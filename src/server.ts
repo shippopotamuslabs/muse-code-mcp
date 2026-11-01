@@ -7,7 +7,7 @@ import { MuseService } from "./sessions.ts";
 import { registerTools } from "./tools.ts";
 
 export function createMcpServer(service: MuseService): McpServer {
-  const mcp = new McpServer({ name: "muse-mcp", version: "0.1.0" });
+  const mcp = new McpServer({ name: "muse-mcp", version: "0.2.0" });
   registerTools(mcp, service);
   service.setElicitor((item) => {
     const caps = mcp.server.getClientCapabilities();

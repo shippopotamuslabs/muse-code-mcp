@@ -37,6 +37,12 @@ Keep it that way.
   are the plain support modules: TOML config and env layering,
   session records, the JSONL audit log, and the credential-method
   refusal list.
+- `src/stream.ts` is the plain stream module: it translates host
+  view frames into the client stream contract and coalesces text
+  deltas. `MuseService` taps its ordered frame flow in `deliver()`
+  and hands events to a sink the server edge injects; the contract
+  lives in the README's Streaming section and
+  `plans/streaming/plan.md`.
 
 `PROBE.md` is the source of truth for the protocol where it
 disagrees with any brief or plan: the probe frames in `probe/logs/`

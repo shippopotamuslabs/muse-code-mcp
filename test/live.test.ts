@@ -7,6 +7,7 @@ import test from "node:test";
 import { readAudit } from "../src/audit.ts";
 import { ensureHome } from "../src/config.ts";
 import { MuseService } from "../src/sessions.ts";
+import type { StreamEvent } from "../src/stream.ts";
 
 const live = process.env.MUSE_MCP_LIVE === "1";
 
@@ -133,6 +134,47 @@ test("live session asks, waits for approval, and leaves a parallel session alone
     assert.equal(svc.result(parallel.session_id).answer.includes("PARALLEL"), true);
     const body = readFileSync(join(workspace, "beta.txt"), "utf8").trim();
     assert.equal(body, "picked");
+  } finally {
+    await svc.shutdown();
+  }
+});
+
+test("live stream delivers deltas that build the answer", { skip: !live, timeout: 180_000 }, async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-live-ws-"));
+  const { svc } = service();
+  const events: StreamEvent[] = [];
+  svc.setStreamSink((event) => {
+    events.push(event);
+  });
+  try {
+    const spawned = await svc.spawn({
+      workspace,
+      prompt: "Write a short paragraph about the ocean. At least three sentences, plain text only.",
+      model: "muse-spark-1.3",
+      reasoning_effort: "minimal",
+      approval_mode: "yolo",
+      wait: true,
+    });
+    assert.equal(spawned.status, "completed");
+    const answer = svc.result(spawned.session_id).answer;
+    assert.ok(answer.length > 0);
+    const kinds = new Map<string, string>();
+    for (const event of events) {
+      if (event.type === "item-started") {
+        const item = event.item as { itemId?: string; kind?: string } | undefined;
+        if (item?.itemId && item?.kind) kinds.set(item.itemId, item.kind);
+      }
+    }
+    const streamed = events
+      .filter((event) => event.type === "item-delta" && event.itemId && kinds.get(event.itemId) === "agentMessage")
+      .map((event) => event.delta ?? "")
+      .join("");
+    assert.ok(streamed.length > 0, "expected at least one agentMessage delta");
+    // Saturation can make the concatenation fall short of the final text; item/completed rules.
+    assert.equal(answer.startsWith(streamed.slice(0, 40)) || streamed === answer, true);
+    const completed = events.find((event) => event.type === "turn-completed");
+    assert.equal(completed?.answer, answer);
+    assert.equal(completed?.droppedDeltas, 0);
   } finally {
     await svc.shutdown();
   }

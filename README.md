@@ -66,6 +66,35 @@ Tool arguments win over environment variables, which win over `config.toml`.
 
 `auto_approve` rules are `{ match = "<regex>", decision = "approve" }`. `match` is tested against one line of tool name, subject kind, command, host, path, and raw args. A hit approves with the once-only choice and is audit-logged as `policy`.
 
+## Streaming
+
+Rich clients can watch turns live instead of polling `muse_result`. Streaming is opt-in: a client declares the experimental capability `muse.stream` in its initialize capabilities. A client that does not declare it receives no stream traffic and its tool results are unchanged.
+
+```json
+{ "capabilities": { "experimental": { "muse.stream": {} } } }
+```
+
+The server sends one notification method, `notifications/muse/event`, with a plain JSON event object as params:
+
+| Field | Meaning |
+| --- | --- |
+| `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, or `pending`. |
+| `sessionId` | The session the event belongs to. Events cover every session on the connection. |
+| `turnId` | Present when the host frame carries one. |
+| `viewCursor` | The host view cursor, verbatim. Strictly increasing per session; a jump means a gap. |
+| `item` | The full item object on `item-started` and `item-completed`. Passed through uninterpreted. |
+| `itemId`, `field`, `delta` | On `item-delta`: the item, the dotted field path (`"text"` when the host omits it), and the appended text. |
+| `terminal`, `answer` | On `turn-completed`: the turn's terminal word and its final answer text. |
+| `droppedDeltas` | On `turn-completed`: delta events whose send failed during that turn. `muse_status` reports the same count cumulatively as `stream_dropped_deltas`. |
+| `usage` | On `usage`: the host's raw token-usage params. |
+| `requestId`, `kind`, `phase` | On `pending`: a hint that an approval or user-input request was `requested` or `settled`. |
+
+Client guidance:
+
+- Text deltas for one item field are coalesced over 30 ms, so a delta event may carry several host deltas merged. Concatenating a field's delta events in order rebuilds the field, with one exception: if the host surface saturated, the concatenation can fall short. `item-completed` carries the full item and is authoritative. Reconcile from it.
+- A `pending` event is a signal to call `muse_pending`, which stays the source of truth for approval and question payloads. Approvals and questions still arrive through elicitation and the broker exactly as before.
+- A client that cannot keep up loses delta events, never the turn. Sends never block the host, failures are counted in `droppedDeltas`, and the first failure per turn is written to the audit log.
+
 ## Register with Grok Build
 
 User scope writes `~/.grok/config.toml`:
