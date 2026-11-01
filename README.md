@@ -120,7 +120,7 @@ The server makes no Grok-specific calls. The same command works in Cursor or any
 
 ## Probe divergences
 
-`PROBE.md` is the source of truth where it disagrees with the original brief. Short version:
+`PROBE.md` is the source of truth where it disagrees with any summary. Short version:
 
 - `yolo` / `on-request` / `judge` are public names. The wire values are `:unrestricted`+`allowAll`, `:ask-me`+`onRequest`, and `:auto-review`+`onRequest`. Both the profile and the approval mode are always sent. Omitting the profile on this machine produced no approval prompts.
 - Approve selects the once-only `approved` choice (`allow_once`). Deny selects `abort` on this host and passes `reason` when that choice accepts feedback.

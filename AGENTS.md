@@ -41,8 +41,7 @@ Keep it that way.
   view frames into the client stream contract and coalesces text
   deltas. `MuseService` taps its ordered frame flow in `deliver()`
   and hands events to a sink the server edge injects; the contract
-  lives in the README's Streaming section and
-  `plans/streaming/plan.md`.
+  lives in the README's Streaming section.
 
 `PROBE.md` is the source of truth for the protocol where it
 disagrees with any brief or plan: its frames were recorded against
@@ -138,8 +137,9 @@ the commit or PR which live checks ran.
 - `muse session-message` ingress is closed on this machine, so
   there is no `muse_message` tool. Revisit only when the probe
   says ingress opened.
-- Work state lives in `plans/` (Synthitect status files). Keep
-  `plans/muse-mcp/status.md` current when a phase moves.
+- Work state (Synthitect plans and status files) lives in a local
+  `plans/` directory, which is gitignored. This repo carries code
+  and contracts; process commentary stays off it.
 - PR titles follow the org convention — `type(scope): imperative
   subject (KEY-123)` — with the ticket key when the work has one.
   Individual commit messages are not linted; write them for the

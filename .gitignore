@@ -5,3 +5,4 @@ dist/
 
 # Raw probe captures stay local; PROBE.md carries the findings
 /probe/
+/plans/
