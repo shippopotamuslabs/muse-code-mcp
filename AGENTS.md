@@ -59,6 +59,11 @@ submodule's contents from this repo.
   the MCP edge and the MSP host are adapters, orchestration sits
   in `MuseService`, and the broker, policy, config, and state
   modules stay free of MCP and MSP types.
+- Failure classification follows `contracts/gospel/CODE-STYLE-GOSPEL.md`
+  §§10–11, which are cross-stack canon: expected vs exceptional
+  failures, partial success as diagnostics carried in values, one
+  handler per boundary. The mechanism this repo uses is named
+  under "Failure handling" below.
 - Tests follow `contracts/gospel/TESTING-GOSPEL.md`: the general
   sections apply in full; its Android-specific §6 does not apply
   here.
@@ -66,11 +71,36 @@ submodule's contents from this repo.
   write-ups, error text — follows
   `contracts/gospel/WUMBO-GOSPEL.md`.
 - `CODE-STYLE-GOSPEL.md` is the Kotlin and Compose style canon;
-  it does not govern TypeScript. This repo's style is the style
-  already in `src/`: TypeScript ESM, `.ts` import specifiers,
-  explicit exported types, no build step.
+  apart from §§10–11 above, it does not govern TypeScript. This
+  repo's style is the style already in `src/`: TypeScript ESM,
+  `.ts` import specifiers, explicit exported types, no build step.
 - The UI gospels (Palette, Compose, Glass Bars, Button Shape) do
   not apply to this repo; it has no UI surface.
+
+## Failure handling
+
+The §11 classification, in this repo's terms:
+
+- **Expected failures** are the routine refusals: unknown or
+  closed session, idle steer, bad workspace, missing or double
+  prompt, invalid config, unknown pending id, a refused credential
+  method, `sessionInUse`, `workspaceNotTrusted`. The pure modules
+  carry them as Result-style unions where the caller branches
+  (`policy.selectChoice`) or as `BrokerError` in the broker.
+  `MuseService` raises the rest as plain `Error`s. That is this
+  surface's named fallback under §11: the MCP tool edge is the one
+  handler, converting each failure exactly once into an `isError`
+  tool result with the message. Nothing below the edge logs an
+  error it propagates; there is no logger in `src/`.
+- **Exceptional failures** (host crash, corrupt state, protocol
+  breakage) propagate to the same edge, or to `main()` at startup,
+  which writes the message to stderr and exits 1. Stdout carries
+  MCP frames only.
+- **Partial success** rides as values: a host fingerprint drift is
+  a `fingerprint_warning` on `muse_status`, a dead host marks its
+  sessions `orphaned` in state, and policy or expiry actions are
+  audit lines. A degradation with no value and no audit line is a
+  bug against §10.
 
 ## Tests
 
