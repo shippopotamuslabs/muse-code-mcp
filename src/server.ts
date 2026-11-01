@@ -47,7 +47,7 @@ async function elicit(mcp: McpServer, service: MuseService, item: PendingItem): 
     if (item.kind === "approval") {
       const decision = content.decision === "deny" ? "deny" : content.decision === "approve" ? "approve" : undefined;
       if (!decision) return;
-      service.decide(item.requestId, decision, "user", typeof content.reason === "string" ? content.reason : undefined);
+      await service.decide(item.requestId, decision, "user", typeof content.reason === "string" ? content.reason : undefined);
       return;
     }
     if (typeof content.answer === "string") await service.answer(item.requestId, "user", content.answer);

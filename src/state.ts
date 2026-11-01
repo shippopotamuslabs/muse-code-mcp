@@ -70,8 +70,8 @@ export class SessionStore {
 
   private read(): StateFile {
     const parsed = JSON.parse(readFileSync(this.path(), "utf8")) as StateFile;
-    if (!parsed.sessions || typeof parsed.sessions !== "object") {
-      return { sessions: {} };
+    if (!parsed || typeof parsed !== "object" || !parsed.sessions || typeof parsed.sessions !== "object" || Array.isArray(parsed.sessions)) {
+      throw new Error(`state file is corrupt: ${this.path()} has no sessions object`);
     }
     return parsed;
   }

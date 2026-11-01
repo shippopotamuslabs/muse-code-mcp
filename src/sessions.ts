@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { MspError, Session, readSessionDurability, type ExitClassification } from "@muse-code/sdk";
+import { MspError, Session, readSessionDurability, type ApprovalFailure, type ExitClassification } from "@muse-code/sdk";
 import { appendAudit, type AuditActor, type AuditEvent } from "./audit.ts";
 import { buildUserInputAnswers, type QuestionView } from "./answers.ts";
 import { BrokerError, PendingBroker, type PendingItem, type PendingKind } from "./broker.ts";
@@ -339,6 +339,7 @@ export class MuseService {
       if (error instanceof MspError && error.kind === "sessionInUse") {
         throw new Error(
           `session ${sessionId} is in use by another client (sessionInUse: ${error.message}). Muse MCP will not attach to it.`,
+          { cause: error },
         );
       }
       throw error;
@@ -374,7 +375,9 @@ export class MuseService {
       // Settling it would send a second decide. This server sends the one frame itself.
       return new Promise(() => {});
     });
-    sdk.onApprovalError(() => {});
+    sdk.onApprovalError((failure) => {
+      this.audit(approvalFailureEvent(record.sessionId, failure));
+    });
     this.live.set(record.sessionId, live);
     return live;
   }
@@ -618,6 +621,22 @@ export class MuseService {
   private audit(event: AuditEvent): void {
     appendAudit(this.options.home, event);
   }
+}
+
+/** An SDK approval round trip that did not complete, as an audit event. */
+export function approvalFailureEvent(sessionId: string, failure: ApprovalFailure): AuditEvent {
+  return {
+    kind: "error",
+    sessionId,
+    requestId: failure.approvalId,
+    detail: {
+      source: "approval",
+      failure: failure.kind,
+      ...("error" in failure
+        ? { error: failure.error instanceof Error ? failure.error.message : String(failure.error) }
+        : {}),
+    },
+  };
 }
 
 export function asActor(actor: string | undefined): AuditActor {

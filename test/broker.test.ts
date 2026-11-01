@@ -79,6 +79,32 @@ test("deny uses abort and passes feedback when the choice accepts it", () => {
   assert.equal(events.at(-1)?.actor, "user");
 });
 
+test("an expiring approval with no deny choice is dropped and the drop is audited", () => {
+  const { pending, events, advance } = broker({ timeoutSec: 10 });
+  let decided: { choiceId: string } | undefined;
+  pending.registerApproval(
+    {
+      approvalId: "ap-2",
+      sessionId: "sess-1",
+      toolName: "network",
+      subject: { kind: "network", host: "example.com" },
+      availableChoices: [{ choiceId: "allow_once", decision: "approved", scope: "once", label: "Allow once" }],
+    },
+    (decision) => {
+      decided = decision;
+    },
+  );
+  advance(10_000);
+  const actions = pending.sweep();
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0]?.approval, undefined);
+  assert.equal(actions[0]?.question, undefined);
+  assert.equal(decided, undefined);
+  assert.equal(pending.list().length, 0);
+  const expiry = events.find((event) => event.kind === "expiry");
+  assert.equal((expiry?.detail as { resolution?: string })?.resolution, "dropped");
+});
+
 test("an old approval expires to deny and an old question expires to cancel", () => {
   const { pending, events, advance } = broker({ timeoutSec: 10 });
   let denied: { choiceId: string; feedback?: string } | undefined;

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { ensureHome } from "../src/config.ts";
 import { readAudit } from "../src/audit.ts";
-import { MuseService } from "../src/sessions.ts";
+import { approvalFailureEvent, MuseService } from "../src/sessions.ts";
 
 const FAKE = join(import.meta.dirname, "fake-muse.mjs");
 
@@ -87,13 +87,31 @@ test("sessionInUse is surfaced and not retried", async () => {
     const spawned = await box.service.spawn({ workspace: box.workspace });
     await until(() => box.service.status(spawned.session_id)[0]?.status === "orphaned");
     box.env.MUSE_FAKE_SCENARIO = "in-use";
-    await assert.rejects(() => box.service.turn({ session_id: spawned.session_id, prompt: "nope" }), /sessionInUse/);
+    const error = await box.service.turn({ session_id: spawned.session_id, prompt: "nope" }).catch((caught: unknown) => caught);
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /sessionInUse/);
+    assert.equal((error.cause as { kind?: string } | undefined)?.kind, "sessionInUse");
     assert.equal(box.service.status(spawned.session_id)[0]?.status, "orphaned");
     const resumes = box.methods().filter((entry) => entry.method === "session/resume");
     assert.equal(resumes.length, 1);
   } finally {
     await box.service.shutdown();
   }
+});
+
+test("an approval failure becomes an error audit event", () => {
+  const failed = approvalFailureEvent("sess-1", { kind: "submitFailed", approvalId: "ap-9", error: new Error("host gone") });
+  assert.equal(failed.kind, "error");
+  assert.equal(failed.sessionId, "sess-1");
+  assert.equal(failed.requestId, "ap-9");
+  assert.deepEqual(failed.detail, { source: "approval", failure: "submitFailed", error: "host gone" });
+  const unoffered = approvalFailureEvent("sess-1", {
+    kind: "unofferedChoice",
+    approvalId: "ap-10",
+    choiceId: "allow_always",
+    availableChoiceIds: ["allow_once"],
+  });
+  assert.deepEqual(unoffered.detail, { source: "approval", failure: "unofferedChoice" });
 });
 
 test("fingerprint drift keeps the host and stores a warning", async () => {

@@ -92,7 +92,13 @@ export function registerTools(mcp: McpServer, service: MuseService): void {
       description: "List pending approval and user-input requests across sessions.",
       inputSchema: {},
     },
-    async () => ok(await service.pending()),
+    async () => {
+      try {
+        return ok(await service.pending());
+      } catch (error) {
+        return fail(error);
+      }
+    },
   );
 
   mcp.registerTool(

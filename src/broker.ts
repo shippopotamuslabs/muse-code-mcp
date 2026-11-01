@@ -195,7 +195,21 @@ export class PendingBroker {
       if (now - item.receivedAt < timeoutMs) continue;
       if (item.kind === "approval") {
         const selected = selectChoice(item.payload.availableChoices, "deny", "pending timeout");
-        if (!selected.ok) continue;
+        if (!selected.ok) {
+          // No deny or abort choice exists to send. Holding the item would
+          // strand it past every later sweep with no record; drop it and
+          // audit the drop as the expiry outcome.
+          this.held.delete(item.requestId);
+          this.options.audit({
+            kind: "expiry",
+            actor: "policy",
+            sessionId: item.sessionId,
+            requestId: item.requestId,
+            detail: { kind: "approval", resolution: "dropped", reason: "no deny choice offered" },
+          });
+          actions.push({ item: this.publicItem(item) });
+          continue;
+        }
         this.held.delete(item.requestId);
         this.options.audit({
           kind: "expiry",

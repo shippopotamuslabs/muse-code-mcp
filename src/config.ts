@@ -107,7 +107,7 @@ function parseRules(value: unknown): AutoApproveRule[] {
     try {
       new RegExp(match);
     } catch (err) {
-      throw new Error(`auto_approve[${index}].match is not a regex: ${(err as Error).message}`);
+      throw new Error(`auto_approve[${index}].match is not a regex: ${(err as Error).message}`, { cause: err });
     }
     if (row.decision !== "approve") {
       throw new Error(`auto_approve[${index}].decision must be "approve"`);
