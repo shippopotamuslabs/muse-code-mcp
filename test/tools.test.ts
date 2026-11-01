@@ -10,6 +10,7 @@ import { readAudit } from "../src/audit.ts";
 import { ensureHome } from "../src/config.ts";
 import { createMcpServer } from "../src/server.ts";
 import { MuseService } from "../src/sessions.ts";
+import type { StreamEvent } from "../src/stream.ts";
 
 const FAKE = join(import.meta.dirname, "fake-muse.mjs");
 
@@ -46,6 +47,96 @@ test("an MCP client lists every Muse tool", async () => {
     assert.deepEqual(names, [...NAMES].sort());
     const spawn = listed.tools.find((tool) => tool.name === "muse_spawn");
     assert.equal(JSON.stringify(spawn?.inputSchema).includes("output_schema"), false);
+  } finally {
+    await client.close();
+    await service.shutdown();
+  }
+});
+
+function streamHarness() {
+  const home = mkdtempSync(join(tmpdir(), "muse-mcp-stream-"));
+  const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-ws-"));
+  const config = ensureHome(home, {});
+  const service = new MuseService({
+    home,
+    config,
+    bin: FAKE,
+    env: {
+      MUSE_FAKE_SCENARIO: "stream",
+      MUSE_FAKE_ARGV_LOG: join(home, "argv.log"),
+      MUSE_FAKE_METHOD_LOG: join(home, "methods.log"),
+    },
+    shutdownTimeoutMs: 0,
+  });
+  return { home, workspace, service };
+}
+
+async function untilStream(check: () => boolean, ms = 3000): Promise<void> {
+  const start = Date.now();
+  while (!check()) {
+    if (Date.now() - start > ms) throw new Error("timed out waiting for stream events");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+test("a streaming-capable client receives the turn as notifications", async () => {
+  const { workspace, service } = streamHarness();
+  const mcp = createMcpServer(service);
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client(
+    { name: "muse-mcp-test", version: "0" },
+    { capabilities: { experimental: { "muse.stream": {} } } },
+  );
+  const events: StreamEvent[] = [];
+  client.fallbackNotificationHandler = async (notification) => {
+    if (notification.method === "notifications/muse/event") {
+      events.push(notification.params as unknown as StreamEvent);
+    }
+  };
+  try {
+    await Promise.all([mcp.connect(serverTransport), client.connect(clientTransport)]);
+    const spawned = await client.callTool({
+      name: "muse_spawn",
+      arguments: { workspace, prompt: "go", wait: true },
+    });
+    assert.equal(spawned.isError, undefined);
+    await untilStream(() => events.some((event) => event.type === "turn-completed"));
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["turn-started", "item-started", "item-delta", "item-completed", "turn-completed"],
+    );
+    const delta = events.find((event) => event.type === "item-delta");
+    assert.equal(delta?.delta, "MSP STREAM OK");
+    const result = await client.callTool({
+      name: "muse_result",
+      arguments: { session_id: events[0]?.sessionId },
+    });
+    const content = result.content as Array<{ type: string; text?: string }>;
+    assert.equal((JSON.parse(content[0]?.text ?? "{}") as { answer: string }).answer, delta?.delta);
+  } finally {
+    await client.close();
+    await service.shutdown();
+  }
+});
+
+test("a client without the streaming capability receives no notifications", async () => {
+  const { workspace, service } = streamHarness();
+  const mcp = createMcpServer(service);
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "muse-mcp-test", version: "0" }, { capabilities: {} });
+  const methods: string[] = [];
+  client.fallbackNotificationHandler = async (notification) => {
+    methods.push(notification.method);
+  };
+  try {
+    await Promise.all([mcp.connect(serverTransport), client.connect(clientTransport)]);
+    const spawned = await client.callTool({
+      name: "muse_spawn",
+      arguments: { workspace, prompt: "go", wait: true },
+    });
+    assert.equal(spawned.isError, undefined);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.deepEqual(methods.filter((method) => method === "notifications/muse/event"), []);
   } finally {
     await client.close();
     await service.shutdown();

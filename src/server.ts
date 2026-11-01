@@ -14,6 +14,14 @@ export function createMcpServer(service: MuseService): McpServer {
     if (!caps?.elicitation) return;
     void elicit(mcp, service, item);
   });
+  service.setStreamSink((event) => {
+    const caps = mcp.server.getClientCapabilities();
+    if (!caps?.experimental?.["muse.stream"]) return;
+    return mcp.server.notification({
+      method: "notifications/muse/event",
+      params: event as unknown as Record<string, unknown>,
+    });
+  });
   return mcp;
 }
 
