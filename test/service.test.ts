@@ -6,6 +6,7 @@ import test from "node:test";
 import { ensureHome } from "../src/config.ts";
 import { readAudit } from "../src/audit.ts";
 import { approvalFailureEvent, MuseService } from "../src/sessions.ts";
+import type { StreamEvent } from "../src/stream.ts";
 
 const FAKE = join(import.meta.dirname, "fake-muse.mjs");
 
@@ -112,6 +113,51 @@ test("an approval failure becomes an error audit event", () => {
     availableChoiceIds: ["allow_once"],
   });
   assert.deepEqual(unoffered.detail, { source: "approval", failure: "unofferedChoice" });
+});
+
+test("a stream sink receives the turn in order and the deltas build the answer", async () => {
+  const box = harness("stream");
+  const events: StreamEvent[] = [];
+  box.service.setStreamSink((event) => {
+    events.push(event);
+  });
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+    assert.equal(spawned.status, "completed");
+    assert.deepEqual(
+      events.map((event) => event.type),
+      ["turn-started", "item-started", "item-delta", "item-completed", "turn-completed"],
+    );
+    const delta = events.find((event) => event.type === "item-delta");
+    assert.equal(delta?.delta, "MSP STREAM OK");
+    assert.equal(delta?.delta, box.service.result(spawned.session_id).answer);
+    const completed = events.find((event) => event.type === "turn-completed");
+    assert.equal(completed?.answer, "MSP STREAM OK");
+    assert.equal(completed?.droppedDeltas, 0);
+    const cursors = events.map((event) => Number((event.viewCursor ?? "c0").slice(1)));
+    assert.equal(cursors.every((cursor, index) => index === 0 || cursor > (cursors[index - 1] ?? 0)), true);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("a failing stream sink never breaks the turn and the drops are counted", async () => {
+  const box = harness("stream");
+  box.service.setStreamSink(() => {
+    throw new Error("client gone");
+  });
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+    assert.equal(spawned.status, "completed");
+    assert.equal(box.service.result(spawned.session_id).answer, "MSP STREAM OK");
+    assert.equal(box.service.status(spawned.session_id)[0]?.stream_dropped_deltas, 1);
+    const errors = readAudit(box.home).filter(
+      (event) => event.kind === "error" && (event.detail as { source?: string })?.source === "stream",
+    );
+    assert.equal(errors.length, 1);
+  } finally {
+    await box.service.shutdown();
+  }
 });
 
 test("fingerprint drift keeps the host and stores a warning", async () => {

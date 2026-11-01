@@ -9,6 +9,7 @@ import { MuseHost, postureKey, type HostFrame, type HostPosture } from "./host.t
 import type { ApprovalSubjectView } from "./policy.ts";
 import { credentialMethod } from "./raw.ts";
 import { SessionStore, type SessionRecord } from "./state.ts";
+import { Coalescer, translateFrame, type StreamSink } from "./stream.ts";
 
 export interface SpawnInput {
   workspace: string;
@@ -54,6 +55,8 @@ export interface StatusResult {
   pending_approvals: number;
   pending_user_inputs: number;
   fingerprint_warning?: string;
+  /** Stream delta events whose send failed, cumulative for this live session. */
+  stream_dropped_deltas?: number;
 }
 
 export interface ResultView {
@@ -75,6 +78,12 @@ interface Live {
   lastTerminal?: string;
   /** In-flight `approval/decide` sends, keyed by approval id. */
   decideSends: Map<string, Promise<unknown>>;
+  /** Stream delta sends that failed in the current turn. */
+  streamDroppedTurn: number;
+  /** Stream delta sends that failed across this live session. */
+  streamDroppedTotal: number;
+  /** Whether a stream failure was already audited for the current turn. */
+  streamErrorAudited: boolean;
 }
 
 type ApprovalWire = ApprovalSubjectView & { sessionId: string; currentRequirementId?: unknown };
@@ -89,6 +98,9 @@ export class MuseService {
   private readonly seenApprovals = new Set<string>();
   private opening = 0;
   private readonly timer: ReturnType<typeof setInterval>;
+  private readonly coalescer: Coalescer;
+  private readonly streamTimer: ReturnType<typeof setInterval>;
+  private streamSink?: StreamSink;
   private readonly options: {
     home: string;
     config: MuseMcpConfig;
@@ -115,10 +127,18 @@ export class MuseService {
     });
     this.timer = setInterval(() => this.expire(), 1000);
     this.timer.unref?.();
+    this.coalescer = new Coalescer({ sink: (event) => this.sendStream(event) });
+    this.streamTimer = setInterval(() => this.coalescer.tick(), 25);
+    this.streamTimer.unref?.();
   }
 
   setElicitor(elicitor: (item: PendingItem) => void): void {
     this.elicitor = elicitor;
+  }
+
+  /** Receive stream events (plans/streaming/plan.md). One sink; the server edge owns it. */
+  setStreamSink(sink: StreamSink): void {
+    this.streamSink = sink;
   }
 
   async pending(): Promise<Array<PendingItem & { ageSec: number }>> {
@@ -281,6 +301,8 @@ export class MuseService {
 
   async shutdown(): Promise<void> {
     clearInterval(this.timer);
+    clearInterval(this.streamTimer);
+    this.coalescer.flushAll();
     const hosts = [...this.hosts.values()];
     this.hosts.clear();
     await Promise.all(hosts.map((host) => host.close().catch(() => undefined)));
@@ -362,6 +384,9 @@ export class MuseService {
       settled: new Set(),
       answer: record.lastAnswer ?? "",
       decideSends: new Map(),
+      streamDroppedTurn: 0,
+      streamDroppedTotal: 0,
+      streamErrorAudited: false,
     };
     sdk.onApproval((request) => {
       const stage = stageKey(request.sessionId, request.approvalId, request.currentRequirementId.sourceIndex);
@@ -498,6 +523,53 @@ export class MuseService {
       live.record.updatedAt = new Date().toISOString();
       this.store.upsert(live.record);
     }
+    this.emitStream(live, frame);
+  }
+
+  /** Tap the ordered frame flow for stream clients. Runs after all bookkeeping. */
+  private emitStream(live: Live, frame: HostFrame): void {
+    if (!this.streamSink) return;
+    const event = translateFrame(frame);
+    if (!event) return;
+    if (event.type === "turn-started") {
+      live.streamDroppedTurn = 0;
+      live.streamErrorAudited = false;
+    }
+    if (event.type === "turn-completed") {
+      event.answer = live.answer;
+      event.droppedDeltas = live.streamDroppedTurn;
+    }
+    this.coalescer.push(event);
+  }
+
+  /** Send one stream event. A failing client never blocks or breaks the host pump. */
+  private sendStream(event: Parameters<StreamSink>[0]): void {
+    const sink = this.streamSink;
+    if (!sink) return;
+    try {
+      const result: unknown = sink(event);
+      if (result instanceof Promise) {
+        result.catch((error: unknown) => this.streamFailed(event, error));
+      }
+    } catch (error) {
+      this.streamFailed(event, error);
+    }
+  }
+
+  private streamFailed(event: Parameters<StreamSink>[0], error: unknown): void {
+    const live = this.live.get(event.sessionId);
+    if (!live) return;
+    if (event.type === "item-delta") {
+      live.streamDroppedTurn += 1;
+      live.streamDroppedTotal += 1;
+    }
+    if (live.streamErrorAudited) return;
+    live.streamErrorAudited = true;
+    this.audit({
+      kind: "error",
+      sessionId: event.sessionId,
+      detail: { source: "stream", error: error instanceof Error ? error.message : String(error) },
+    });
   }
 
   private flush(sessionId: string): void {
@@ -600,6 +672,7 @@ export class MuseService {
       pending_approvals: pending.filter((item) => item.kind === "approval").length,
       pending_user_inputs: pending.filter((item) => item.kind === "userInput").length,
       fingerprint_warning: live?.host.fingerprintWarning ?? record.fingerprintWarning,
+      ...(live ? { stream_dropped_deltas: live.streamDroppedTotal } : {}),
     };
   }
 

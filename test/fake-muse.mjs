@@ -72,7 +72,7 @@ const CHOICES = [
   { choiceId: "abort", decision: "abort", scope: "once", label: "Reject", acceptsFeedback: true },
 ];
 
-function completeTurn(sessionId, turnId, text, terminal = "completed") {
+function completeTurn(sessionId, turnId, text, terminal = "completed", revision = 1) {
   const meta = range();
   notify("item/completed", {
     sessionId,
@@ -83,7 +83,7 @@ function completeTurn(sessionId, turnId, text, terminal = "completed") {
       messagePhase: "finalAnswer",
       text,
       status: "completed",
-      revision: 1,
+      revision,
       turnId,
     },
   });
@@ -178,7 +178,35 @@ function askUser(sessionId, turnId) {
   send({ jsonrpc: "2.0", id: serverId++, method: "userInput/request", params });
 }
 
+function streamTurn(sessionId, turnId) {
+  beginTurn(sessionId, turnId);
+  const itemId = `msg-${turnId}`;
+  notify("item/started", {
+    sessionId,
+    ...range(),
+    item: {
+      itemId,
+      kind: "agentMessage",
+      messagePhase: "finalAnswer",
+      text: "",
+      status: "inProgress",
+      revision: 1,
+      turnId,
+    },
+  });
+  for (const part of ["MSP ", "STREAM ", "OK"]) {
+    seq += 1;
+    notify("item/delta", { sessionId, itemId, delta: part, viewCursor: `c${seq}` });
+  }
+  // Revision 2: the fold ignores a completion that does not advance the started item's revision.
+  completeTurn(sessionId, turnId, "MSP STREAM OK", "completed", 2);
+}
+
 function afterStart(sessionId, turnId) {
+  if (scenario === "stream") {
+    streamTurn(sessionId, turnId);
+    return;
+  }
   if (scenario === "hang") {
     beginTurn(sessionId, turnId);
     return;
