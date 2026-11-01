@@ -1,0 +1,82 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { ApprovalModeName, ReasoningEffortName } from "./config.ts";
+
+export const SESSION_STATUSES = ["idle", "running", "orphaned", "closed"] as const;
+export type SessionStatus = (typeof SESSION_STATUSES)[number];
+
+export interface SessionRecord {
+  sessionId: string;
+  workspace: string;
+  model?: string;
+  reasoningEffort?: ReasoningEffortName;
+  approvalMode: ApprovalModeName;
+  hostKey: string;
+  status: SessionStatus;
+  turnId?: string;
+  contributorMode: boolean;
+  preset?: string;
+  worktree?: "off" | "create" | "existing";
+  worktreePath?: string;
+  fingerprintWarning?: string;
+  lastAnswer?: string;
+  lastTerminal?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface StateFile {
+  sessions: Record<string, SessionRecord>;
+}
+
+export class SessionStore {
+  private readonly home: string;
+
+  constructor(home: string) {
+    this.home = home;
+  }
+
+  path(): string {
+    return join(this.home, "state.json");
+  }
+
+  /** Load records. Live statuses from a previous process become orphaned. */
+  load(): SessionRecord[] {
+    const file = this.read();
+    let changed = false;
+    for (const record of Object.values(file.sessions)) {
+      if (record.status === "idle" || record.status === "running") {
+        record.status = "orphaned";
+        changed = true;
+      }
+    }
+    if (changed) this.write(file);
+    return Object.values(file.sessions);
+  }
+
+  list(): SessionRecord[] {
+    return Object.values(this.read().sessions);
+  }
+
+  get(sessionId: string): SessionRecord | undefined {
+    return this.read().sessions[sessionId];
+  }
+
+  upsert(record: SessionRecord): void {
+    const file = this.read();
+    file.sessions[record.sessionId] = record;
+    this.write(file);
+  }
+
+  private read(): StateFile {
+    const parsed = JSON.parse(readFileSync(this.path(), "utf8")) as StateFile;
+    if (!parsed.sessions || typeof parsed.sessions !== "object") {
+      return { sessions: {} };
+    }
+    return parsed;
+  }
+
+  private write(file: StateFile): void {
+    writeFileSync(this.path(), JSON.stringify(file, null, 2) + "\n");
+  }
+}
