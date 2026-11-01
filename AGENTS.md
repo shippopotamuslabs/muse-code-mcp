@@ -43,10 +43,10 @@ Keep it that way.
   and hands events to a sink the server edge injects; the contract
   lives in the README's Streaming section.
 
-`PROBE.md` is the source of truth for the protocol where it
-disagrees with any brief or plan: its frames were recorded against
-the real CLI. The raw probe captures are kept locally and are not
-part of this repo.
+`docs/PROTOCOL.md` is the source of truth for the protocol where
+it disagrees with any summary: its frames were recorded against
+the real CLI. The raw captures are kept locally and are not part
+of this repo.
 
 ## Gospels
 

@@ -1,4 +1,4 @@
-# PROBE — Muse Code 1.4.14 on this machine
+# PROTOCOL — Muse Session Protocol (MSP), probed against Muse Code 1.4.14
 
 Everything below was probed against the real CLI on 2026-11-01. CLI: `Muse Code 1.4.14 (1.4.14-R7309.1)`. No auth file was read, printed, or copied. The raw capture files are kept locally and are not part of this repo.
 
