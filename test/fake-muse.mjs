@@ -96,7 +96,8 @@ function completeTurn(sessionId, turnId, text, terminal = "completed", revision 
 }
 
 function beginTurn(sessionId, turnId) {
-  notify("turn/started", { sessionId, turnId, commandId: turnId, ...range() });
+  // Real TurnStartedParams carry a sourceRange but no viewCursor.
+  notify("turn/started", { sessionId, turnId, commandId: turnId, sourceRange: range().sourceRange });
 }
 
 function pendingFile() {

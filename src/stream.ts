@@ -18,7 +18,7 @@ export type StreamEventType =
 export interface StreamEvent {
   type: StreamEventType;
   sessionId: string;
-  /** Host view cursor, verbatim. Strictly monotonic per session. */
+  /** Host view cursor, verbatim. Strictly monotonic per session. Present on item, usage, and turn-completed events; turn-started carries none. */
   viewCursor?: string;
   turnId?: string;
   /** Full item object on item-started and item-completed. Passed through, never interpreted. */
@@ -76,10 +76,10 @@ export function translateFrame(frame: HostFrame): StreamEvent | undefined {
     case "session/tokenUsage":
     case "usage/changed":
       return { ...base, type: "usage", usage: params };
-    case "approval/requested":
-    case "approval/request": {
-      // The view name and the host's synthesized request name describe the
-      // same approval. A duplicate hint is harmless: hints only say "refresh".
+    case "approval/requested": {
+      // Only the view-stream name maps. The host's synthesized
+      // `approval/request` frame is the SDK request channel, not the view
+      // stream; mapping it too would hint twice for one approval.
       const requestId = str(params, "approvalId");
       if (!requestId) return undefined;
       return { ...base, type: "pending", requestId, kind: "approval", phase: "requested" };

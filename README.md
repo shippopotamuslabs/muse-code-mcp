@@ -81,7 +81,7 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 | `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, or `pending`. |
 | `sessionId` | The session the event belongs to. Events cover every session on the connection. |
 | `turnId` | Present when the host frame carries one. |
-| `viewCursor` | The host view cursor, verbatim. Strictly increasing per session; a jump means a gap. |
+| `viewCursor` | The host view cursor, verbatim, on item, usage, and turn-completed events (`turn-started` carries none). Strictly increasing per session; a jump means a gap. |
 | `item` | The full item object on `item-started` and `item-completed`. Passed through uninterpreted. |
 | `itemId`, `field`, `delta` | On `item-delta`: the item, the dotted field path (`"text"` when the host omits it), and the appended text. |
 | `terminal`, `answer` | On `turn-completed`: the turn's terminal word and its final answer text. |
@@ -93,7 +93,7 @@ Client guidance:
 
 - Text deltas for one item field are coalesced over 30 ms, so a delta event may carry several host deltas merged. Concatenating a field's delta events in order rebuilds the field, with one exception: if the host surface saturated, the concatenation can fall short. `item-completed` carries the full item and is authoritative. Reconcile from it.
 - A `pending` event is a signal to call `muse_pending`, which stays the source of truth for approval and question payloads. Approvals and questions still arrive through elicitation and the broker exactly as before.
-- A client that cannot keep up loses delta events, never the turn. Sends never block the host, failures are counted in `droppedDeltas`, and the first failure per turn is written to the audit log.
+- A client that cannot keep up loses delta events, never the turn. Sends never block the host, failures are counted in `droppedDeltas`, and the first failure per turn is written to the audit log. If the `turn-completed` send itself fails, that turn's per-turn count goes with it; the cumulative `stream_dropped_deltas` in `muse_status` stays accurate.
 
 ## Register with Grok Build
 

@@ -40,10 +40,8 @@ test("approval and user-input frames become pending hints", () => {
     translateFrame({ method: "approval/requested", params: { sessionId: "s1", approvalId: "a1" } }),
     { type: "pending", sessionId: "s1", requestId: "a1", kind: "approval", phase: "requested" },
   );
-  assert.deepEqual(
-    translateFrame({ method: "approval/request", params: { sessionId: "s1", approvalId: "a1" } }),
-    { type: "pending", sessionId: "s1", requestId: "a1", kind: "approval", phase: "requested" },
-  );
+  // The synthesized SDK request channel is not the view stream: no hint.
+  assert.equal(translateFrame({ method: "approval/request", params: { sessionId: "s1", approvalId: "a1" } }), undefined);
   assert.deepEqual(
     translateFrame({ method: "approval/resolved", params: { sessionId: "s1", approvalId: "a1" } }),
     { type: "pending", sessionId: "s1", requestId: "a1", kind: "approval", phase: "settled" },

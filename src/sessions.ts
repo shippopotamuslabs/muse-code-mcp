@@ -537,6 +537,8 @@ export class MuseService {
     }
     if (event.type === "turn-completed") {
       event.answer = live.answer;
+      // If this send itself fails, the per-turn count goes with it.
+      // The cumulative count in muse_status stays accurate either way.
       event.droppedDeltas = live.streamDroppedTurn;
     }
     this.coalescer.push(event);
@@ -548,8 +550,10 @@ export class MuseService {
     if (!sink) return;
     try {
       const result: unknown = sink(event);
-      if (result instanceof Promise) {
-        result.catch((error: unknown) => this.streamFailed(event, error));
+      if (isThenable(result)) {
+        // Promise.resolve also tames non-native thenables, which an
+        // instanceof check would leave without a rejection handler.
+        void Promise.resolve(result).catch((error: unknown) => this.streamFailed(event, error));
       }
     } catch (error) {
       this.streamFailed(event, error);
@@ -781,4 +785,12 @@ function agentText(sdk: Session): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as { then?: unknown }).then === "function"
+  );
 }

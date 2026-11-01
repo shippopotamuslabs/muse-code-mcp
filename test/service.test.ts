@@ -134,7 +134,11 @@ test("a stream sink receives the turn in order and the deltas build the answer",
     const completed = events.find((event) => event.type === "turn-completed");
     assert.equal(completed?.answer, "MSP STREAM OK");
     assert.equal(completed?.droppedDeltas, 0);
-    const cursors = events.map((event) => Number((event.viewCursor ?? "c0").slice(1)));
+    assert.equal(events[0]?.turnId, spawned.turn_id);
+    assert.equal(completed?.turnId, spawned.turn_id);
+    // turn-started carries no viewCursor on the real protocol; the rest strictly increase.
+    const cursors = events.flatMap((event) => (event.viewCursor ? [Number(event.viewCursor.slice(1))] : []));
+    assert.equal(cursors.length, 4);
     assert.equal(cursors.every((cursor, index) => index === 0 || cursor > (cursors[index - 1] ?? 0)), true);
   } finally {
     await box.service.shutdown();
