@@ -309,7 +309,8 @@ View-stream names the server folds: `item/started`, `item/delta`, `item/complete
 
 ## Verbatim help
 
-The same bytes are in `probe/help/`.
+Captured verbatim from the installed CLI. The raw capture files
+are kept locally and are not part of this repo.
 
 ### muse --version
 

@@ -45,8 +45,9 @@ Keep it that way.
   `plans/streaming/plan.md`.
 
 `PROBE.md` is the source of truth for the protocol where it
-disagrees with any brief or plan: the probe frames in `probe/logs/`
-were recorded against the real CLI.
+disagrees with any brief or plan: its frames were recorded against
+the real CLI. The raw probe captures are kept locally and are not
+part of this repo.
 
 ## Gospels
 
