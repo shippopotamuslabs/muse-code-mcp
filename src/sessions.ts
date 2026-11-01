@@ -84,6 +84,10 @@ interface Live {
   streamDroppedTotal: number;
   /** Whether a stream failure was already audited for the current turn. */
   streamErrorAudited: boolean;
+  /** Pending hints already emitted this turn, as `requestId:kind:phase`. */
+  pendingHints: Set<string>;
+  /** In-flight delta sends, tracked so turn-completed can stamp after they settle. */
+  pendingDeltaSends: Set<Promise<void>>;
 }
 
 type ApprovalWire = ApprovalSubjectView & { sessionId: string; currentRequirementId?: unknown };
@@ -128,7 +132,7 @@ export class MuseService {
     this.timer = setInterval(() => this.expire(), 1000);
     this.timer.unref?.();
     this.coalescer = new Coalescer({ sink: (event) => this.sendStream(event) });
-    this.streamTimer = setInterval(() => this.coalescer.tick(), 25);
+    this.streamTimer = setInterval(() => this.coalescer.tick(), 10);
     this.streamTimer.unref?.();
   }
 
@@ -385,8 +389,10 @@ export class MuseService {
       answer: record.lastAnswer ?? "",
       decideSends: new Map(),
       streamDroppedTurn: 0,
-      streamDroppedTotal: 0,
+      streamDroppedTotal: record.streamDroppedDeltas ?? 0,
       streamErrorAudited: false,
+      pendingHints: new Set(),
+      pendingDeltaSends: new Set(),
     };
     sdk.onApproval((request) => {
       const stage = stageKey(request.sessionId, request.approvalId, request.currentRequirementId.sourceIndex);
@@ -465,6 +471,9 @@ export class MuseService {
     for (const [sessionId, live] of this.live) {
       if (live.host !== host) continue;
       live.sdk.hostExited(exit);
+      // Flush buffered deltas while the session is still in the live map,
+      // so a failed send here is counted and audited like any other.
+      this.coalescer.flushSession(sessionId);
       this.broker.dropSession(sessionId);
       for (const stage of this.seenApprovals) {
         if (stage.startsWith(`${sessionId}:`)) this.seenApprovals.delete(stage);
@@ -534,12 +543,20 @@ export class MuseService {
     if (event.type === "turn-started") {
       live.streamDroppedTurn = 0;
       live.streamErrorAudited = false;
+      live.pendingHints.clear();
     }
     if (event.type === "turn-completed") {
       event.answer = live.answer;
-      // If this send itself fails, the per-turn count goes with it.
-      // The cumulative count in muse_status stays accurate either way.
-      event.droppedDeltas = live.streamDroppedTurn;
+      // droppedDeltas is stamped later, in sendStream: the coalescer
+      // flushes this session's buffered deltas on the way to this event,
+      // and failures in that flush must land in the count first.
+    }
+    if (event.type === "pending") {
+      // The host can surface one request twice (the view frame and the
+      // synthesized request frame). One hint per request per turn.
+      const key = `${event.requestId ?? ""}:${event.kind ?? ""}:${event.phase ?? ""}`;
+      if (live.pendingHints.has(key)) return;
+      live.pendingHints.add(key);
     }
     this.coalescer.push(event);
   }
@@ -548,12 +565,48 @@ export class MuseService {
   private sendStream(event: Parameters<StreamSink>[0]): void {
     const sink = this.streamSink;
     if (!sink) return;
+    if (event.type !== "turn-completed") {
+      this.sendNow(sink, event);
+      return;
+    }
+    // Stamp droppedDeltas at send time, after the coalescer's final flush
+    // for the session, and after that flush's sends settle: several frames
+    // can arrive in one synchronous chunk, so a rejected delta send may not
+    // have run its failure handler yet when this event is reached. The wait
+    // is capped; sends that outlive it settle into the cumulative count in
+    // muse_status instead. If this send itself fails, the count goes with it.
+    const live = this.live.get(event.sessionId);
+    const pending = live ? [...live.pendingDeltaSends] : [];
+    if (!live || pending.length === 0) {
+      if (live) event.droppedDeltas = live.streamDroppedTurn;
+      this.sendNow(sink, event);
+      return;
+    }
+    void Promise.race([
+      Promise.allSettled(pending),
+      new Promise((resolve) => setTimeout(resolve, 250)),
+    ]).then(() => {
+      event.droppedDeltas = live.streamDroppedTurn;
+      this.sendNow(sink, event);
+    });
+  }
+
+  private sendNow(sink: StreamSink, event: Parameters<StreamSink>[0]): void {
     try {
       const result: unknown = sink(event);
-      if (isThenable(result)) {
-        // Promise.resolve also tames non-native thenables, which an
-        // instanceof check would leave without a rejection handler.
-        void Promise.resolve(result).catch((error: unknown) => this.streamFailed(event, error));
+      if (!isThenable(result)) return;
+      // Promise.resolve also tames non-native thenables, which an
+      // instanceof check would leave without a rejection handler.
+      const tracked = Promise.resolve(result).then(
+        () => undefined,
+        (error: unknown) => this.streamFailed(event, error),
+      );
+      if (event.type === "item-delta") {
+        const live = this.live.get(event.sessionId);
+        if (live) {
+          live.pendingDeltaSends.add(tracked);
+          void tracked.then(() => live.pendingDeltaSends.delete(tracked));
+        }
       }
     } catch (error) {
       this.streamFailed(event, error);
@@ -566,6 +619,10 @@ export class MuseService {
     if (event.type === "item-delta") {
       live.streamDroppedTurn += 1;
       live.streamDroppedTotal += 1;
+      // Persist the cumulative count so muse_status keeps it after the
+      // session leaves the live map (host death, restart).
+      live.record.streamDroppedDeltas = live.streamDroppedTotal;
+      this.store.upsert(live.record);
     }
     if (live.streamErrorAudited) return;
     live.streamErrorAudited = true;
@@ -676,7 +733,7 @@ export class MuseService {
       pending_approvals: pending.filter((item) => item.kind === "approval").length,
       pending_user_inputs: pending.filter((item) => item.kind === "userInput").length,
       fingerprint_warning: live?.host.fingerprintWarning ?? record.fingerprintWarning,
-      ...(live ? { stream_dropped_deltas: live.streamDroppedTotal } : {}),
+      stream_dropped_deltas: live?.streamDroppedTotal ?? record.streamDroppedDeltas ?? 0,
     };
   }
 

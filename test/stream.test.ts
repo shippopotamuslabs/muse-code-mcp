@@ -27,12 +27,15 @@ test("turn and item frames translate to stream events", () => {
   assert.deepEqual(completed, { type: "turn-completed", sessionId: "s1", viewCursor: "c9", turnId: "t1", terminal: "completed" });
 });
 
-test("usage frames carry the raw params", () => {
+test("usage frames carry the raw params and say which frame they were", () => {
   const params = { sessionId: "s1", viewCursor: "c4", cumulative: { total: 42 }, modelId: "muse-spark" };
   const event = translateFrame({ method: "session/tokenUsage", params });
   assert.equal(event?.type, "usage");
+  assert.equal(event?.usageKind, "tokenUsage");
   assert.deepEqual(event?.usage, params);
-  assert.equal(translateFrame({ method: "usage/changed", params })?.type, "usage");
+  const changed = translateFrame({ method: "usage/changed", params });
+  assert.equal(changed?.type, "usage");
+  assert.equal(changed?.usageKind, "changed");
 });
 
 test("approval and user-input frames become pending hints", () => {
@@ -40,8 +43,11 @@ test("approval and user-input frames become pending hints", () => {
     translateFrame({ method: "approval/requested", params: { sessionId: "s1", approvalId: "a1" } }),
     { type: "pending", sessionId: "s1", requestId: "a1", kind: "approval", phase: "requested" },
   );
-  // The synthesized SDK request channel is not the view stream: no hint.
-  assert.equal(translateFrame({ method: "approval/request", params: { sessionId: "s1", approvalId: "a1" } }), undefined);
+  // The synthesized request frame maps to the same hint; the service dedupes.
+  assert.deepEqual(
+    translateFrame({ method: "approval/request", params: { sessionId: "s1", approvalId: "a1" } }),
+    { type: "pending", sessionId: "s1", requestId: "a1", kind: "approval", phase: "requested" },
+  );
   assert.deepEqual(
     translateFrame({ method: "approval/resolved", params: { sessionId: "s1", approvalId: "a1" } }),
     { type: "pending", sessionId: "s1", requestId: "a1", kind: "approval", phase: "settled" },

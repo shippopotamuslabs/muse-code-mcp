@@ -159,8 +159,98 @@ test("a failing stream sink never breaks the turn and the drops are counted", as
       (event) => event.kind === "error" && (event.detail as { source?: string })?.source === "stream",
     );
     assert.equal(errors.length, 1);
+    const stored = JSON.parse(readFileSync(join(box.home, "state.json"), "utf8")) as {
+      sessions: Record<string, { streamDroppedDeltas?: number }>;
+    };
+    assert.equal(stored.sessions[spawned.session_id]?.streamDroppedDeltas, 1);
   } finally {
     await box.service.shutdown();
+  }
+});
+
+test("delta-only send failures land in the turn-completed count, sync and async", async () => {
+  for (const mode of ["throw", "reject"] as const) {
+    const box = harness("stream");
+    const received: StreamEvent[] = [];
+    box.service.setStreamSink((event) => {
+      if (event.type === "item-delta") {
+        if (mode === "throw") throw new Error("delta sink down");
+        return Promise.reject(new Error("delta sink down"));
+      }
+      received.push(event);
+      return undefined;
+    });
+    try {
+      const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+      assert.equal(spawned.status, "completed");
+      // The turn-completed stream event can land just after the turn itself.
+      await until(() => received.some((event) => event.type === "turn-completed"));
+      const completed = received.find((event) => event.type === "turn-completed");
+      assert.equal(completed?.droppedDeltas, 1, `mode ${mode}`);
+      assert.equal(box.service.result(spawned.session_id).answer, "MSP STREAM OK");
+    } finally {
+      await box.service.shutdown();
+    }
+  }
+});
+
+test("streaming on or off leaves result and status payloads identical", async () => {
+  const off = harness("stream");
+  const on = harness("stream");
+  on.service.setStreamSink(() => {});
+  try {
+    const offSpawn = await off.service.spawn({ workspace: off.workspace, prompt: "go", wait: true });
+    const onSpawn = await on.service.spawn({ workspace: on.workspace, prompt: "go", wait: true });
+    const offResult = off.service.result(offSpawn.session_id);
+    const onResult = on.service.result(onSpawn.session_id);
+    assert.equal(onResult.answer, offResult.answer);
+    assert.equal(onResult.status, offResult.status);
+    assert.equal(onResult.terminal, offResult.terminal);
+    const offStatus = off.service.status(offSpawn.session_id)[0];
+    const onStatus = on.service.status(onSpawn.session_id)[0];
+    assert.equal(onStatus?.status, offStatus?.status);
+    assert.equal(onStatus?.stream_dropped_deltas, 0);
+    assert.equal(offStatus?.stream_dropped_deltas, 0);
+  } finally {
+    await off.service.shutdown();
+    await on.service.shutdown();
+  }
+});
+
+test("one approval and one question each produce exactly one pending hint", async () => {
+  const approvalBox = harness("approve");
+  const approvalEvents: StreamEvent[] = [];
+  approvalBox.service.setStreamSink((event) => {
+    approvalEvents.push(event);
+  });
+  try {
+    const spawned = await approvalBox.service.spawn({ workspace: approvalBox.workspace, prompt: "net", wait: false });
+    await until(() => approvalEvents.some((event) => event.type === "pending"));
+    // Let the second surface of the same request (view frame) arrive too.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    const hints = approvalEvents.filter((event) => event.type === "pending");
+    assert.equal(hints.length, 1);
+    assert.equal(hints[0]?.kind, "approval");
+    assert.equal(hints[0]?.phase, "requested");
+    assert.equal(hints[0]?.requestId, `ap-${spawned.session_id}`);
+  } finally {
+    await approvalBox.service.shutdown();
+  }
+
+  const questionBox = harness("user-input");
+  const questionEvents: StreamEvent[] = [];
+  questionBox.service.setStreamSink((event) => {
+    questionEvents.push(event);
+  });
+  try {
+    const spawned = await questionBox.service.spawn({ workspace: questionBox.workspace, prompt: "ask", wait: false });
+    await until(() => questionEvents.some((event) => event.type === "pending"));
+    const hints = questionEvents.filter((event) => event.type === "pending");
+    assert.equal(hints.length, 1);
+    assert.equal(hints[0]?.kind, "userInput");
+    assert.equal(hints[0]?.requestId, `ui-${spawned.session_id}`);
+  } finally {
+    await questionBox.service.shutdown();
   }
 });
 

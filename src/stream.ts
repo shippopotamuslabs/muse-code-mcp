@@ -35,6 +35,8 @@ export interface StreamEvent {
   droppedDeltas?: number;
   /** Raw usage params on usage events (`session/tokenUsage` or `usage/changed`). */
   usage?: unknown;
+  /** Which host frame a usage event came from: a cumulative snapshot or a change notice. */
+  usageKind?: "tokenUsage" | "changed";
   /** Pending hint fields. A hint means "refresh muse_pending"; muse_pending is the truth. */
   requestId?: string;
   kind?: "approval" | "userInput";
@@ -74,12 +76,13 @@ export function translateFrame(frame: HostFrame): StreamEvent | undefined {
       return { ...base, type: "item-delta", itemId, field: str(params, "field") ?? "text", delta };
     }
     case "session/tokenUsage":
+      return { ...base, type: "usage", usageKind: "tokenUsage", usage: params };
     case "usage/changed":
-      return { ...base, type: "usage", usage: params };
-    case "approval/requested": {
-      // Only the view-stream name maps. The host's synthesized
-      // `approval/request` frame is the SDK request channel, not the view
-      // stream; mapping it too would hint twice for one approval.
+      return { ...base, type: "usage", usageKind: "changed", usage: params };
+    case "approval/requested":
+    case "approval/request": {
+      // Both names describe the same approval: the view frame and the
+      // host's synthesized request frame. MuseService dedupes the hint.
       const requestId = str(params, "approvalId");
       if (!requestId) return undefined;
       return { ...base, type: "pending", requestId, kind: "approval", phase: "requested" };

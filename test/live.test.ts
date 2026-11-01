@@ -158,20 +158,22 @@ test("live stream delivers deltas that build the answer", { skip: !live, timeout
     assert.equal(spawned.status, "completed");
     const answer = svc.result(spawned.session_id).answer;
     assert.ok(answer.length > 0);
-    const kinds = new Map<string, string>();
+    // Find the completed agentMessage item whose text is the answer, then
+    // check that item's deltas alone: they must form a prefix of the answer
+    // (saturation can only cut the tail; item/completed stays authoritative).
+    let answerItemId: string | undefined;
     for (const event of events) {
-      if (event.type === "item-started") {
-        const item = event.item as { itemId?: string; kind?: string } | undefined;
-        if (item?.itemId && item?.kind) kinds.set(item.itemId, item.kind);
-      }
+      if (event.type !== "item-completed") continue;
+      const item = event.item as { itemId?: string; kind?: string; text?: string } | undefined;
+      if (item?.kind === "agentMessage" && item.text === answer) answerItemId = item.itemId;
     }
+    assert.ok(answerItemId, "expected a completed agentMessage item matching the answer");
     const streamed = events
-      .filter((event) => event.type === "item-delta" && event.itemId && kinds.get(event.itemId) === "agentMessage")
+      .filter((event) => event.type === "item-delta" && event.itemId === answerItemId)
       .map((event) => event.delta ?? "")
       .join("");
-    assert.ok(streamed.length > 0, "expected at least one agentMessage delta");
-    // Saturation can make the concatenation fall short of the final text; item/completed rules.
-    assert.equal(answer.startsWith(streamed.slice(0, 40)) || streamed === answer, true);
+    assert.ok(streamed.length > 0, "expected at least one delta for the answer item");
+    assert.equal(answer.startsWith(streamed), true);
     const completed = events.find((event) => event.type === "turn-completed");
     assert.equal(completed?.answer, answer);
     assert.equal(completed?.droppedDeltas, 0);

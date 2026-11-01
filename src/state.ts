@@ -19,6 +19,8 @@ export interface SessionRecord {
   worktree?: "off" | "create" | "existing";
   worktreePath?: string;
   fingerprintWarning?: string;
+  /** Cumulative stream delta sends that failed for this session. */
+  streamDroppedDeltas?: number;
   lastAnswer?: string;
   lastTerminal?: string;
   createdAt: string;

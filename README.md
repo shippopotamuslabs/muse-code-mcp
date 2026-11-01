@@ -86,14 +86,14 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 | `itemId`, `field`, `delta` | On `item-delta`: the item, the dotted field path (`"text"` when the host omits it), and the appended text. |
 | `terminal`, `answer` | On `turn-completed`: the turn's terminal word and its final answer text. |
 | `droppedDeltas` | On `turn-completed`: delta events whose send failed during that turn. `muse_status` reports the same count cumulatively as `stream_dropped_deltas`. |
-| `usage` | On `usage`: the host's raw token-usage params. |
+| `usage`, `usageKind` | On `usage`: the host's raw token-usage params, plus which frame they came from: `tokenUsage` (a cumulative snapshot) or `changed` (a change notice). |
 | `requestId`, `kind`, `phase` | On `pending`: a hint that an approval or user-input request was `requested` or `settled`. |
 
 Client guidance:
 
 - Text deltas for one item field are coalesced over 30 ms, so a delta event may carry several host deltas merged. Concatenating a field's delta events in order rebuilds the field, with one exception: if the host surface saturated, the concatenation can fall short. `item-completed` carries the full item and is authoritative. Reconcile from it.
 - A `pending` event is a signal to call `muse_pending`, which stays the source of truth for approval and question payloads. Approvals and questions still arrive through elicitation and the broker exactly as before.
-- A client that cannot keep up loses delta events, never the turn. Sends never block the host, failures are counted in `droppedDeltas`, and the first failure per turn is written to the audit log. If the `turn-completed` send itself fails, that turn's per-turn count goes with it; the cumulative `stream_dropped_deltas` in `muse_status` stays accurate.
+- A client that cannot keep up loses delta events, never the turn. Sends never block the host, failures are counted in `droppedDeltas`, and the first failure per turn is written to the audit log. The `turn-completed` event waits, up to 250 ms, for the turn's in-flight delta sends to settle before its count is stamped; sends that outlive the wait, and the count on a `turn-completed` whose own send fails, still land in the cumulative `stream_dropped_deltas` in `muse_status`, which persists across restarts.
 
 ## Register with Grok Build
 

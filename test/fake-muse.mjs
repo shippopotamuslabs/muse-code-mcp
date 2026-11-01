@@ -154,6 +154,8 @@ function askApproval(sessionId, turnId) {
   stored.approvals.push(params);
   writePending(stored);
   send({ jsonrpc: "2.0", id: serverId++, method: "approval/request", params });
+  // The real host also folds the request into the view stream under this name.
+  notify("approval/requested", { sessionId, approvalId, ...range() });
 }
 
 function askUser(sessionId, turnId) {

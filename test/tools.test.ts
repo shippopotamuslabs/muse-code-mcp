@@ -137,6 +137,11 @@ test("a client without the streaming capability receives no notifications", asyn
     assert.equal(spawned.isError, undefined);
     await new Promise((resolve) => setTimeout(resolve, 150));
     assert.deepEqual(methods.filter((method) => method === "notifications/muse/event"), []);
+    const spawnContent = spawned.content as Array<{ type: string; text?: string }>;
+    const sessionId = (JSON.parse(spawnContent[0]?.text ?? "{}") as { session_id: string }).session_id;
+    const result = await client.callTool({ name: "muse_result", arguments: { session_id: sessionId } });
+    const content = result.content as Array<{ type: string; text?: string }>;
+    assert.equal((JSON.parse(content[0]?.text ?? "{}") as { answer: string }).answer, "MSP STREAM OK");
   } finally {
     await client.close();
     await service.shutdown();
