@@ -100,7 +100,7 @@ Client guidance:
 User scope writes `~/.grok/config.toml`:
 
 ```bash
-grok mcp add muse-mcp -- /home/sean/Code/muse-code-mcp/bin/muse-mcp
+grok mcp add muse-mcp -- /path/to/muse-code-mcp/bin/muse-mcp
 ```
 
 ## Generic MCP client
@@ -109,7 +109,7 @@ grok mcp add muse-mcp -- /home/sean/Code/muse-code-mcp/bin/muse-mcp
 {
   "mcpServers": {
     "muse-mcp": {
-      "command": "/home/sean/Code/muse-code-mcp/bin/muse-mcp",
+      "command": "/path/to/muse-code-mcp/bin/muse-mcp",
       "args": []
     }
   }
@@ -145,3 +145,11 @@ Live checks against the installed `muse` are off unless you opt in. They spend m
 ```bash
 MUSE_MCP_LIVE=1 node --experimental-strip-types --test --test-timeout=300000 test/live.test.ts
 ```
+
+## License
+
+Licensed under the 0BSD license (see `LICENSE`).
+
+This is an independent project. It is not affiliated with or
+endorsed by Meta. Muse and Muse Code are trademarks of Meta
+Platforms, Inc.
