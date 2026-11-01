@@ -25,6 +25,7 @@ const NAMES = [
   "muse_result",
   "muse_cancel",
   "muse_close",
+  "muse_message",
   "muse_raw",
 ];
 

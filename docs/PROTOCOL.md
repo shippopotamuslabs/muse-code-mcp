@@ -24,7 +24,7 @@ The CLI schema is the authority wherever a summary disagrees with it.
 - `session/start.worktree` is experimental: `{mode:"create", baseRef?}` or `{mode:"existing", path}`. It is absent from the stable `session/start` params. Sending it requires `experimentalApi: true`. A live start through the server failed. The server returned the host error and did not run `git worktree`. See "Live worktree start" below.
 - No MSP field, stable or experimental, for `muse exec --output-schema`, `--max-model-steps`, or `--user-input-auto-resolve`. Those knobs are not on the tool schema. `pending_timeout_sec` is this server's timer, not the exec flag. User-input also has the host's own `autoResolutionMs` and `userInput/cancel`.
 - `--preset` and `--contributor-mode` are host-lifetime flags (`muse serve`), not per-session wire fields. The server pools one host per workspace + contributor + preset + trust. Sandbox stays on. `yolo` does not pass `--disable-sandbox`. `--trust-workspace` is passed so workspace skills load. Contributor mode is passed explicitly `off` unless the caller sets it, because this machine's settings have contributor mode on.
-- `session-message list --json` returned `{"schema_version":1,"status":"unavailable","error_code":"external_agent_ingress_closed"}`. Inter-session messaging is gated off. It is not implemented.
+- `session-message list --json` exits 1. Stdout is `{"schema_version":1,"status":"unavailable","error_code":"external_agent_ingress_closed"}`. Stderr is `external agent ingress is unavailable`. `muse_message` returns that JSON as a normal result. Ingress opens only when the target process was started with `MUSE_EXPERIMENTAL_EXTERNAL_AGENT_INGRESS` or `MUSE_EXPERIMENTAL_LOCAL_SESSION_MESSAGING`. Neither variable was live-tested as an opener. Setting them on the `session-message` client does not open a target that was started without them.
 - `turn/steer` idle refusal is schema-mined (`expectedTurnId` must be the running turn) and unit-verified against the fake. It was not part of the live probe.
 - Goal and compaction methods are reachable through `muse_raw` only.
 
@@ -66,9 +66,13 @@ Error [MspError]: Repository '/tmp/muse-mcp-live-wt-Av44wJ' is not trusted; work
 
 `--trust-workspace` on a stdio host loads skills and rules; it does not grant this trust. The schema's project-trust error (ADR 31776) is a different gate, and `session/start.limits.workspaceTrusted` is documented as socket-only.
 
-## session-message (probed, not built)
+## session-message
 
-`muse session-message list --json` → `external_agent_ingress_closed`. Ingress depends on `MUSE_EXPERIMENTAL_EXTERNAL_AGENT_INGRESS` / `MUSE_EXPERIMENTAL_LOCAL_SESSION_MESSAGING` having been set when the target processes started. Stretch goal only.
+`muse session-message list [--json]` and `muse session-message send --target <session-uuid-or-name> [--in-reply-to <reply-token>] [--display-context <json>] [--json]`, with the message body on stdin.
+
+Probed `muse session-message list --json` on 2026-11-01: exit code 1. Stdout is one JSON object, `{"schema_version":1,"status":"unavailable","error_code":"external_agent_ingress_closed"}`. Stderr is the line `external agent ingress is unavailable`.
+
+`muse_message` wraps those two subcommands and does not set `MUSE_EXPERIMENTAL_EXTERNAL_AGENT_INGRESS` or `MUSE_EXPERIMENTAL_LOCAL_SESSION_MESSAGING`. Ingress opens only when the target Muse process was started with one of them. Neither variable was live-tested as an opener. The success payload of `send` was not probed; the tool returns stdout JSON as-is.
 
 ## Option map
 

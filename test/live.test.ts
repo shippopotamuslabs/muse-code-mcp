@@ -181,3 +181,19 @@ test("live stream delivers deltas that build the answer", { skip: !live, timeout
     await svc.shutdown();
   }
 });
+
+test("live session-message list reports closed ingress", { skip: !live, timeout: 30_000 }, async () => {
+  const { svc } = service();
+  try {
+    const listed = await svc.message({ action: "list" });
+    assert.equal(listed.exit_code, 1);
+    assert.deepEqual(listed.result, {
+      schema_version: 1,
+      status: "unavailable",
+      error_code: "external_agent_ingress_closed",
+    });
+    assert.match(listed.stderr, /external agent ingress is unavailable/);
+  } finally {
+    await svc.shutdown();
+  }
+});

@@ -201,6 +201,28 @@ export function registerTools(mcp: McpServer, service: MuseService): void {
   );
 
   mcp.registerTool(
+    "muse_message",
+    {
+      description:
+        "List or send muse session-message traffic to a Muse session this server did not start, such as a TUI. send requires target and body. A closed ingress is a normal result with error_code external_agent_ingress_closed, which happens unless that target process was started with MUSE_EXPERIMENTAL_EXTERNAL_AGENT_INGRESS or MUSE_EXPERIMENTAL_LOCAL_SESSION_MESSAGING. Does not replace muse_turn.",
+      inputSchema: {
+        action: z.enum(["list", "send"]),
+        target: z.string().optional().describe("Session uuid or name. Required for send."),
+        body: z.string().optional().describe("Message text for send, written to the CLI stdin. Empty is rejected. Max 64 KiB."),
+        in_reply_to: z.string().optional(),
+        display_context: z.record(z.unknown()).optional().describe("JSON object forwarded as --display-context."),
+      },
+    },
+    async (args) => {
+      try {
+        return ok(await service.message(args));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  mcp.registerTool(
     "muse_raw",
     {
       description:

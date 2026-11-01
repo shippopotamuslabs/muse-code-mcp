@@ -29,7 +29,7 @@ The process speaks MCP on stdin/stdout and opens no port. State lives in `~/.mus
 | --- | --- |
 | `config.toml` | Written on first start if missing. |
 | `state.json` | Sessions this server started. After a restart, idle and running rows load as `orphaned` and resume on next use. |
-| `audit.log` | Append-only JSONL of requests, decisions, answers, expiries, and refusals. |
+| `audit.log` | Append-only JSONL of requests, decisions, answers, expiries, refusals, and session-message calls. Message bodies are not written. |
 
 One `muse serve` host is kept per workspace + contributor mode + preset + trust. A crashed host restarts on the next call. Its sessions are marked `orphaned` and resumed with `session/resume` when the protocol allows. `sessionInUse` is returned to the caller and not retried: this server does not attach to a session an interactive TUI already owns, and it only drives sessions it started.
 
@@ -47,11 +47,20 @@ One `muse serve` host is kept per workspace + contributor mode + preset + trust.
 | `muse_result` | Latest completed turn, final answer text, and a short in-memory event tail. |
 | `muse_cancel` | Cancel the current turn. |
 | `muse_close` | End a session. |
+| `muse_message` | List or send `muse session-message` to a session this server did not start. |
 | `muse_raw` | Send any MSP method with raw params. Credential methods are refused before a frame is written. |
 
 `muse_answer` and `muse_decide` take an optional `actor` of `user` or `orchestrator` (default `orchestrator`). Policy decisions are logged as `policy`. Unanswered approvals expire to deny and unanswered questions are cancelled after `pending_timeout_sec` (default 1800). If the MCP client advertises elicitation, pending items are also offered that way. The tools still work when it does not.
 
 `muse_spawn` arguments: `workspace` (required, absolute, must exist), `prompt` or `prompt_file`, `model`, `reasoning_effort` (`none|minimal|low|medium|high|xhigh|max|ultra`), `preset`, `worktree` (`off|create|existing`) with `worktree_base` or `worktree_path`, `approval_mode` (`yolo|on-request|judge`), `contributor_mode` (default false), `wait` (default false). There is no `output_schema` argument. MSP has no field for it.
+
+`muse_message` takes `action` `list` or `send`. `send` requires `target` (a session uuid or name) and `body` (written to the CLI's stdin, max 64 KiB). Optional `in_reply_to` and `display_context` (a JSON object). Every call passes `--json` and returns `{action, exit_code, result, stderr}`. `result` is the stdout JSON. A non-zero exit whose stdout is JSON is a normal result, including closed ingress:
+
+```json
+{"schema_version":1,"status":"unavailable","error_code":"external_agent_ingress_closed"}
+```
+
+That ingress opens only when the target Muse process was started with `MUSE_EXPERIMENTAL_EXTERNAL_AGENT_INGRESS` or `MUSE_EXPERIMENTAL_LOCAL_SESSION_MESSAGING`. Setting either variable on this server, or on the `session-message` command, does not open a TUI that was started without them. A session this server already drives stays on `muse_turn`. The audit line records the action, target, reply token, body length, exit code, and `error_code`. It does not record the body.
 
 Tool arguments win over environment variables, which win over `config.toml`.
 
@@ -127,7 +136,7 @@ The server makes no Grok-specific calls. The same command works in Cursor or any
 - `worktree` is the experimental `session/start.worktree` field. `off` omits it. On this machine, create and attach against a repository Muse has not marked trusted fail with `-32029` `workspaceNotTrusted`. `--trust-workspace` loads skills and rules and does not grant that trust. The server returns the host error and does not run `git worktree`.
 - `--preset` and `--contributor-mode` are host process flags, not session fields. Contributor mode is sent as `off` unless the caller sets it.
 - No MSP equivalent, so these `muse exec` knobs are not exposed: `--output-schema`, `--max-model-steps`, `--user-input-auto-resolve`.
-- `muse session-message list --json` returned `external_agent_ingress_closed`. `muse_message` is not implemented.
+- `muse session-message list --json` exits 1. Stdout is the closed-ingress object above, and stderr is `external agent ingress is unavailable`. `muse_message` returns that object as a normal result. Neither experimental ingress variable was live-tested as an opener.
 
 `muse_raw` refuses methods under `account/`, `mcpServer/oauth`, and any method whose name contains `login` or `logout`, and writes an audit line with the method name only.
 

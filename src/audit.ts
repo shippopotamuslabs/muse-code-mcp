@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 export type AuditActor = "user" | "orchestrator" | "policy";
 
-export type AuditKind = "request" | "decision" | "answer" | "expiry" | "refuse" | "error";
+export type AuditKind = "request" | "decision" | "answer" | "expiry" | "refuse" | "error" | "message";
 
 export interface AuditEvent {
   ts?: string;

@@ -23,7 +23,7 @@ Keep it that way.
 ## The shape
 
 - `src/server.ts` and `src/tools.ts` are the MCP edge: transport
-  wiring and the eleven `muse_*` tool registrations. Tool handlers
+  wiring and the twelve `muse_*` tool registrations. Tool handlers
   stay thin and delegate to the service.
 - `src/sessions.ts` (`MuseService`) owns orchestration: hosts,
   sessions, turns, steering, pending requests, resume after restart.
@@ -33,10 +33,12 @@ Keep it that way.
 - `src/broker.ts`, `src/policy.ts`, and `src/answers.ts` are the
   pending-request machinery: queueing, auto-approve matching, and
   shaping answers back onto the wire. Plain data in, plain data out.
-- `src/config.ts`, `src/state.ts`, `src/audit.ts`, and `src/raw.ts`
-  are the plain support modules: TOML config and env layering,
-  session records, the JSONL audit log, and the credential-method
-  refusal list.
+- `src/config.ts`, `src/state.ts`, `src/audit.ts`, `src/raw.ts`, and
+  `src/message.ts` are the plain support modules: TOML config and
+  env layering, session records, the JSONL audit log, the
+  credential-method refusal list, and the `muse session-message`
+  subprocess. `message.ts` does not speak MSP and does not touch
+  the session store or the broker.
 - `src/stream.ts` is the plain stream module: it translates host
   view frames into the client stream contract and coalesces text
   deltas. `MuseService` taps its ordered frame flow in `deliver()`
@@ -134,9 +136,14 @@ the commit or PR which live checks ran.
 - A failed worktree request surfaces the host error (e.g.
   `workspaceNotTrusted`). The server never falls back to running
   `git worktree` itself.
-- `muse session-message` ingress is closed on this machine, so
-  there is no `muse_message` tool. Revisit only when the probe
-  says ingress opened.
+- `muse_message` lists and sends `muse session-message` traffic to
+  sessions this server did not start. It does not set
+  `MUSE_EXPERIMENTAL_EXTERNAL_AGENT_INGRESS` or
+  `MUSE_EXPERIMENTAL_LOCAL_SESSION_MESSAGING`. Those have to be
+  present on the target process when it starts. A closed ingress
+  is a normal tool result with `error_code`
+  `external_agent_ingress_closed`. A session this server started
+  is still driven with `muse_turn`.
 - Work state (Synthitect plans and status files) lives in a local
   `plans/` directory, which is gitignored. This repo carries code
   and contracts; process commentary stays off it.

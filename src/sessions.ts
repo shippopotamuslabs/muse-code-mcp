@@ -7,6 +7,7 @@ import { BrokerError, PendingBroker, type PendingItem, type PendingKind } from "
 import { approvalWire, type ApprovalModeName, type MuseMcpConfig, type ReasoningEffortName } from "./config.ts";
 import { MuseHost, postureKey, type HostFrame, type HostPosture } from "./host.ts";
 import type { ApprovalSubjectView } from "./policy.ts";
+import { messageErrorCode, runSessionMessage, SessionMessageError, type MessageInput, type MessageResult } from "./message.ts";
 import { credentialMethod } from "./raw.ts";
 import { SessionStore, type SessionRecord } from "./state.ts";
 import { Coalescer, translateFrame, type StreamSink } from "./stream.ts";
@@ -301,6 +302,21 @@ export class MuseService {
     }
     const live = await this.ensure(sessionId);
     return live.host.connection.request(method, params);
+  }
+
+  /** List or send `muse session-message`. Does not touch hosts this server spawned. */
+  async message(input: MessageInput): Promise<MessageResult> {
+    const env = { ...process.env, ...this.options.env };
+    try {
+      const result = await runSessionMessage(this.options.bin, input, env);
+      this.auditMessage(input, result.exit_code, result.result);
+      return result;
+    } catch (error) {
+      if (error instanceof SessionMessageError && error.exitCode !== undefined) {
+        this.auditMessage(input, error.exitCode, undefined);
+      }
+      throw error;
+    }
   }
 
   async shutdown(): Promise<void> {
@@ -754,6 +770,23 @@ export class MuseService {
 
   private audit(event: AuditEvent): void {
     appendAudit(this.options.home, event);
+  }
+
+  /** Records the call, never the body. A rejected call that never spawned writes nothing. */
+  private auditMessage(input: MessageInput, exitCode: number, result: unknown): void {
+    const errorCode = messageErrorCode(result);
+    this.audit({
+      kind: "message",
+      actor: "orchestrator",
+      detail: {
+        action: input.action,
+        target: input.target,
+        in_reply_to: input.in_reply_to,
+        body_bytes: input.action === "send" && input.body !== undefined ? Buffer.byteLength(input.body) : 0,
+        exit_code: exitCode,
+        ...(errorCode ? { error_code: errorCode } : {}),
+      },
+    });
   }
 }
 
