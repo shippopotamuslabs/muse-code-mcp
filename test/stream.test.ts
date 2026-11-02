@@ -98,6 +98,39 @@ test("session goalChanged frames become goal-changed events with the block verba
   });
 });
 
+test("session todoListChanged frames become todos events carrying the whole snapshot", () => {
+  const items = [
+    { text: "wire the fold", status: "inProgress", activeForm: "wiring the fold" },
+    { text: "write the docs", status: "pending" },
+  ];
+  assert.deepEqual(
+    translateFrame({
+      method: "session/todoListChanged",
+      params: { sessionId: "s1", viewCursor: "c1", items, revision: 3, sourceTool: "write_todos" },
+    }),
+    { type: "todos", sessionId: "s1", viewCursor: "c1", items, revision: 3, sourceTool: "write_todos" },
+  );
+  // A replacement snapshot forwards wholesale, never merged with the last one.
+  const replacement = [{ text: "write the docs", status: "completed" }];
+  assert.deepEqual(
+    translateFrame({
+      method: "session/todoListChanged",
+      params: { sessionId: "s1", viewCursor: "c2", items: replacement, revision: 4, sourceTool: "write_todos" },
+    }),
+    { type: "todos", sessionId: "s1", viewCursor: "c2", items: replacement, revision: 4, sourceTool: "write_todos" },
+  );
+  // An empty list is a cleared list: a real event, not a no-op.
+  assert.deepEqual(
+    translateFrame({
+      method: "session/todoListChanged",
+      params: { sessionId: "s1", viewCursor: "c3", items: [], revision: 5, sourceTool: "write_todos" },
+    }),
+    { type: "todos", sessionId: "s1", viewCursor: "c3", items: [], revision: 5, sourceTool: "write_todos" },
+  );
+  // A frame without an items array carries no snapshot and translates to nothing.
+  assert.equal(translateFrame({ method: "session/todoListChanged", params: { sessionId: "s1", revision: 6 } }), undefined);
+});
+
 test("unmapped frames and frames without a session translate to nothing", () => {
   assert.equal(translateFrame({ method: "session/updated", params: { sessionId: "s1" } }), undefined);
   assert.equal(translateFrame({ method: "item/delta", params: { itemId: "i1", delta: "x" } }), undefined);

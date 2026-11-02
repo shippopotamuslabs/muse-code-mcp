@@ -5,6 +5,9 @@ import type { HostFrame } from "./host.ts";
  * Events are plain JSON objects sent as `notifications/muse/event` params.
  * `item/completed` is authoritative: delta text for a field concatenates to
  * the field value on the completed item unless the host surface saturated.
+ * A `todos` event replaces the session's whole todo list on every event;
+ * an empty list is a cleared list, and `muse_status` reports the same
+ * latest list as `todo_list`.
  */
 export type StreamEventType =
   | "turn-started"
@@ -15,7 +18,8 @@ export type StreamEventType =
   | "usage"
   | "pending"
   | "catalog-changed"
-  | "goal-changed";
+  | "goal-changed"
+  | "todos";
 
 export interface StreamEvent {
   type: StreamEventType;
@@ -47,6 +51,12 @@ export interface StreamEvent {
   catalog?: "skill" | "plugin";
   /** Full goal block on goal-changed, verbatim from `session/goalChanged` (`null` clears). Percent and status pass through unnormalized; clamping is the renderer's job. */
   goal?: unknown;
+  /** Full todo list on todos, verbatim from `session/todoListChanged`. Every event replaces the session's whole list; an empty list is a cleared list, never a no-op. Items carry no stable id and no turn id; a consumer attributes a snapshot to a turn by arrival order within that turn. */
+  items?: unknown;
+  /** Snapshot revision on todos. Diagnostics only, never an ordering guard; `viewCursor` orders. */
+  revision?: number;
+  /** The tool that produced the snapshot on todos, verbatim. */
+  sourceTool?: string;
 }
 
 export type StreamSink = (event: StreamEvent) => void | Promise<void>;
@@ -114,6 +124,17 @@ export function translateFrame(frame: HostFrame): StreamEvent | undefined {
       return { ...base, type: "catalog-changed", catalog: "plugin" };
     case "session/goalChanged":
       return { ...base, type: "goal-changed", goal: params.goal ?? null };
+    case "session/todoListChanged": {
+      // The list is the event: a frame without an items array carries
+      // no snapshot and translates to nothing. An empty array is a
+      // cleared list and forwards as a real event.
+      if (!Array.isArray(params.items)) return undefined;
+      const event: StreamEvent = { ...base, type: "todos", items: params.items };
+      if (typeof params.revision === "number") event.revision = params.revision;
+      const sourceTool = str(params, "sourceTool");
+      if (sourceTool) event.sourceTool = sourceTool;
+      return event;
+    }
     default:
       return undefined;
   }

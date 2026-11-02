@@ -43,7 +43,7 @@ One `muse serve` host is kept per workspace + contributor mode + preset + trust.
 | `muse_pending` | Pending approvals and questions: request id, session, kind, payload, age. |
 | `muse_answer` | Answer a pending question (`request_id`, `answer`). |
 | `muse_decide` | `approve` or `deny` a pending approval. Deny can include `reason`. |
-| `muse_status` | One session or all: state, turn, model, workspace, token usage, pending counts. |
+| `muse_status` | One session or all: state, turn, model, workspace, token usage, latest todo list, pending counts. |
 | `muse_models` | List the host model catalog. Optional `workspace` or `session_id`. |
 | `muse_skills` | List a session's user-invocable skills: the slash-command catalog. |
 | `muse_mcp_servers` | List the MCP servers a session can see. |
@@ -96,7 +96,7 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 
 | Field | Meaning |
 | --- | --- |
-| `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, `pending`, `catalog-changed`, or `goal-changed`. |
+| `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, `pending`, `catalog-changed`, `goal-changed`, or `todos`. |
 | `sessionId` | The session the event belongs to. Events cover every session on the connection. |
 | `turnId` | Present when the host frame carries one. |
 | `viewCursor` | The host view cursor, verbatim, on item, usage, and turn-completed events (`turn-started` carries none). Strictly increasing per session; a jump means a gap. |
@@ -108,11 +108,13 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 | `requestId`, `kind`, `phase` | On `pending`: a hint that an approval or user-input request was `requested` or `settled`. |
 | `catalog` | On `catalog-changed`: which catalog changed, `skill` (re-issue `muse_skills`) or `plugin` (re-issue `muse_plugins`, plus `muse_hooks` and `muse_skills`). |
 | `goal` | On `goal-changed`: the host's goal block verbatim (`null` clears). Percent and status pass through unnormalized. |
+| `items`, `revision`, `sourceTool` | On `todos`: the session's full todo list, the snapshot revision (diagnostics only; `viewCursor` orders), and the tool that produced the snapshot. |
 
 Client guidance:
 
 - Text deltas for one item field are coalesced over 30 ms, so a delta event may carry several host deltas merged. Concatenating a field's delta events in order rebuilds the field, with one exception: if the host surface saturated, the concatenation can fall short. `item-completed` carries the full item and is authoritative. Reconcile from it.
 - A `pending` event is a signal to call `muse_pending`, which stays the source of truth for approval and question payloads. Approvals and questions still arrive through elicitation and the broker exactly as before.
+- A `todos` event replaces the session's whole todo list; an empty `items` array is a cleared list, not a no-op. Items carry no stable id and no turn id, so attribute a snapshot to a turn by its arrival order within that turn. `muse_status` reports the same latest list as `todo_list` (absent when no todo fact has landed), which makes it the reconciler after a reconnect.
 - A client that cannot keep up loses delta events, never the turn. Sends never block the host, failures are counted in `droppedDeltas`, and the first failure per turn is written to the audit log. The `turn-completed` event waits, up to 250 ms, for the turn's in-flight delta sends to settle before its count is stamped; sends that outlive the wait, and the count on a `turn-completed` whose own send fails, still land in the cumulative `stream_dropped_deltas` in `muse_status`, which persists across restarts.
 
 ## Register with Grok Build
