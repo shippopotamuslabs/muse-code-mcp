@@ -27,6 +27,10 @@ const NAMES = [
   "muse_close",
   "muse_message",
   "muse_models",
+  "muse_skills",
+  "muse_mcp_servers",
+  "muse_plugins",
+  "muse_hooks",
   "muse_raw",
 ];
 
@@ -175,6 +179,48 @@ test("an MCP client calls muse_models by workspace", async () => {
     const content = result.content as Array<{ type: string; text?: string }>;
     const parsed = JSON.parse(content[0]?.text ?? "{}") as { models: Array<{ id: string }> };
     assert.equal(parsed.models[0]?.id, "muse-spark-1.3");
+  } finally {
+    await client.close();
+    await service.shutdown();
+  }
+});
+
+test("an MCP client calls muse_skills and muse_mcp_servers for a spawned session", async () => {
+  const home = mkdtempSync(join(tmpdir(), "muse-mcp-catalog-"));
+  const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-ws-"));
+  const config = ensureHome(home, {});
+  const service = new MuseService({
+    home,
+    config,
+    bin: FAKE,
+    env: {
+      MUSE_FAKE_SCENARIO: "ok",
+      MUSE_FAKE_ARGV_LOG: join(home, "argv.log"),
+      MUSE_FAKE_METHOD_LOG: join(home, "methods.log"),
+    },
+    shutdownTimeoutMs: 0,
+  });
+  const mcp = createMcpServer(service);
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "muse-mcp-test", version: "0" });
+  try {
+    await Promise.all([mcp.connect(serverTransport), client.connect(clientTransport)]);
+    const spawned = await client.callTool({ name: "muse_spawn", arguments: { workspace, prompt: "hi", wait: true } });
+    assert.equal(spawned.isError, undefined);
+    const spawnContent = spawned.content as Array<{ type: string; text?: string }>;
+    const sessionId = (JSON.parse(spawnContent[0]?.text ?? "{}") as { session_id: string }).session_id;
+
+    const skills = await client.callTool({ name: "muse_skills", arguments: { session_id: sessionId } });
+    assert.equal(skills.isError, undefined);
+    const skillsContent = skills.content as Array<{ type: string; text?: string }>;
+    const parsedSkills = JSON.parse(skillsContent[0]?.text ?? "{}") as { skills: Array<{ selector: string }> };
+    assert.equal(parsedSkills.skills[0]?.selector, "fix-bug");
+
+    const servers = await client.callTool({ name: "muse_mcp_servers", arguments: { session_id: sessionId } });
+    assert.equal(servers.isError, undefined);
+    const serversContent = servers.content as Array<{ type: string; text?: string }>;
+    const parsedServers = JSON.parse(serversContent[0]?.text ?? "{}") as { servers: Array<{ name: string }> };
+    assert.equal(parsedServers.servers[0]?.name, "github");
   } finally {
     await client.close();
     await service.shutdown();

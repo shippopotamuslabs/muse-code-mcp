@@ -241,6 +241,68 @@ export function registerTools(mcp: McpServer, service: MuseService): void {
   );
 
   mcp.registerTool(
+    "muse_skills",
+    {
+      description:
+        "List the session's user-invocable skills, the slash-command catalog: selector, display name, description, source, and argument hint per skill. Refresh on the host's skill/changed notice.",
+      inputSchema: { session_id: z.string() },
+    },
+    async (args) => {
+      try {
+        return ok(await service.skills(args.session_id));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  mcp.registerTool(
+    "muse_mcp_servers",
+    {
+      description:
+        "List the MCP servers the session can see (experimental mcpServer/list): name, status, and transport per server, with the host row verbatim under raw.",
+      inputSchema: { session_id: z.string() },
+    },
+    async (args) => {
+      try {
+        return ok(await service.mcpServers(args.session_id));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  mcp.registerTool(
+    "muse_plugins",
+    {
+      description: "List the session's installed plugins: id, version, source, and enabled per plugin.",
+      inputSchema: { session_id: z.string() },
+    },
+    async (args) => {
+      try {
+        return ok(await service.plugins(args.session_id));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  mcp.registerTool(
+    "muse_hooks",
+    {
+      description: "List the session's installed hooks: key, event, handler kind, and enabled per hook.",
+      inputSchema: { session_id: z.string() },
+    },
+    async (args) => {
+      try {
+        return ok(await service.hooks(args.session_id));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  mcp.registerTool(
     "muse_raw",
     {
       description:

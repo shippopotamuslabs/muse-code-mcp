@@ -515,3 +515,114 @@ test("models mapping keeps display fields verbatim in snake_case", async () => {
     await box.service.shutdown();
   }
 });
+
+test("skills by session lists the slash catalog decoded, and an unknown session sends no frame", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "hi", wait: true });
+    const listed = await box.service.skills(spawned.session_id);
+    assert.equal(listed.session_id, spawned.session_id);
+    assert.equal(listed.skills.length, 2);
+    assert.deepEqual(listed.skills[0], {
+      selector: "fix-bug",
+      display_name: "Fix Bug",
+      description: "Diagnose and fix a bug",
+      source: "user",
+      plugin_id: null,
+      argument_hint: "<description>",
+      title: null,
+    });
+    assert.equal(listed.skills[1]?.selector, "acme:deploy");
+    assert.equal(listed.skills[1]?.plugin_id, "acme");
+    assert.equal(listed.skills[1]?.title, "Acme Deploy");
+    const lists = box.methods().filter((entry) => entry.method === "skill/list");
+    assert.equal(lists.length, 1);
+    assert.equal(lists[0]?.params.sessionId, spawned.session_id);
+    await assert.rejects(() => box.service.skills("sess-does-not-exist"), /unknown session/);
+    assert.equal(box.methods().filter((entry) => entry.method === "skill/list").length, 1);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("skills returns an empty catalog without error and rejects a result with no skills array", async () => {
+  const empty = harness("catalog-empty");
+  try {
+    const spawned = await empty.service.spawn({ workspace: empty.workspace, prompt: "hi", wait: true });
+    assert.deepEqual((await empty.service.skills(spawned.session_id)).skills, []);
+  } finally {
+    await empty.service.shutdown();
+  }
+
+  const malformed = harness("catalog-malformed");
+  try {
+    const spawned = await malformed.service.spawn({ workspace: malformed.workspace, prompt: "hi", wait: true });
+    await assert.rejects(() => malformed.service.skills(spawned.session_id), /no skills array for skill\/list/);
+  } finally {
+    await malformed.service.shutdown();
+  }
+});
+
+test("plugins and hooks by session list their catalogs decoded", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "hi", wait: true });
+    const plugins = await box.service.plugins(spawned.session_id);
+    assert.deepEqual(plugins.plugins, [
+      { id: "acme", version: "1.2.0", source: "marketplace", enabled: true },
+      { id: "local-tools", version: "0.1.0", source: "local", enabled: false },
+    ]);
+    const hooks = await box.service.hooks(spawned.session_id);
+    assert.deepEqual(hooks.hooks, [
+      { key: "lint-on-save", event: "postToolUse", handler_kind: "user", enabled: true },
+      { key: "block-push", event: "preToolUse", handler_kind: "project", enabled: false },
+    ]);
+    assert.equal(box.methods().filter((entry) => entry.method === "plugin/list").length, 1);
+    assert.equal(box.methods().filter((entry) => entry.method === "hook/list").length, 1);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("mcp servers by session normalizes name, status, and transport and keeps the host row under raw", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "hi", wait: true });
+    const listed = await box.service.mcpServers(spawned.session_id);
+    assert.equal(listed.servers.length, 2);
+    assert.equal(listed.servers[0]?.name, "github");
+    assert.equal(listed.servers[0]?.status, "connected");
+    assert.equal(listed.servers[0]?.transport, "streamableHttp");
+    assert.equal(listed.servers[0]?.raw.url, "https://example.invalid/mcp");
+    assert.equal(listed.servers[1]?.name, "local-db");
+    assert.equal(listed.servers[1]?.status, null);
+    const lists = box.methods().filter((entry) => entry.method === "mcpServer/list");
+    assert.equal(lists.length, 1);
+    assert.equal(lists[0]?.params.sessionId, spawned.session_id);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("mcp servers accepts the mcpServers key and an id/state row shape", async () => {
+  const box = harness("mcp-servers-alt-key");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "hi", wait: true });
+    const listed = await box.service.mcpServers(spawned.session_id);
+    assert.equal(listed.servers.length, 1);
+    assert.equal(listed.servers[0]?.name, "alt-server");
+    assert.equal(listed.servers[0]?.status, "ready");
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("mcp servers rejects a result with no servers array", async () => {
+  const box = harness("catalog-malformed");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "hi", wait: true });
+    await assert.rejects(() => box.service.mcpServers(spawned.session_id), /no servers array for mcpServer\/list/);
+  } finally {
+    await box.service.shutdown();
+  }
+});
