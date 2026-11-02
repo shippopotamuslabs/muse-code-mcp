@@ -78,6 +78,8 @@ export interface StatusResult {
   contributor_mode: boolean;
   preset?: string;
   token_usage?: unknown;
+  /** Latest todo list from the fold (`TodoListState` or the last `session/todoListChanged` params); absent when no todo fact has landed. */
+  todo_list?: unknown;
   pending_approvals: number;
   pending_user_inputs: number;
   fingerprint_warning?: string;
@@ -890,6 +892,7 @@ export class MuseService {
     const live = this.live.get(record.sessionId);
     const pending = this.broker.list().filter((item) => item.sessionId === record.sessionId);
     const usage = live ? live.sdk.fold.sessionState.get("session/tokenUsage") : undefined;
+    const todos = live ? live.sdk.fold.sessionState.get("session/todoListChanged") : undefined;
     return {
       session_id: record.sessionId,
       status: record.status,
@@ -902,6 +905,7 @@ export class MuseService {
       contributor_mode: record.contributorMode,
       preset: record.preset,
       token_usage: usage,
+      todo_list: todos,
       pending_approvals: pending.filter((item) => item.kind === "approval").length,
       pending_user_inputs: pending.filter((item) => item.kind === "userInput").length,
       fingerprint_warning: live?.host.fingerprintWarning ?? record.fingerprintWarning,

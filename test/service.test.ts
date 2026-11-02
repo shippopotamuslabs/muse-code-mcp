@@ -765,3 +765,54 @@ test("goalChanged notices reach the stream sink verbatim, null for a clear", asy
     await box.service.shutdown();
   }
 });
+
+test("todoListChanged notices reach the stream sink in order, and muse_status reports the latest list", async () => {
+  const box = harness("todos");
+  const events: StreamEvent[] = [];
+  box.service.setStreamSink((event) => {
+    events.push(event);
+  });
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+    assert.equal(spawned.status, "completed");
+    await until(() => events.filter((event) => event.type === "todos").length === 3);
+    const todos = events.filter((event) => event.type === "todos");
+    assert.ok(todos.every((event) => event.sessionId === spawned.session_id));
+    assert.deepEqual(
+      todos.map((event) => event.revision),
+      [1, 2, 3],
+    );
+    assert.deepEqual(todos[0]?.items, [
+      { text: "wire the fold", status: "inProgress", activeForm: "wiring the fold" },
+      { text: "write the docs", status: "pending" },
+    ]);
+    assert.equal(todos[0]?.sourceTool, "write_todos");
+    assert.deepEqual(todos[1]?.items, [
+      { text: "wire the fold", status: "completed" },
+      { text: "write the docs", status: "inProgress", activeForm: "writing the docs" },
+    ]);
+    // The cleared list arrives as a real event with an empty items array.
+    assert.deepEqual(todos[2]?.items, []);
+
+    // muse_status reports the same latest list from the fold.
+    const status = box.service.status(spawned.session_id)[0];
+    const reported = status?.todo_list as { items?: unknown; revision?: unknown; sourceTool?: unknown } | undefined;
+    assert.deepEqual(reported?.items, []);
+    assert.equal(reported?.revision, 3);
+    assert.equal(reported?.sourceTool, "write_todos");
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("muse_status leaves todo_list absent when no todo fact has landed", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+    assert.equal(spawned.status, "completed");
+    const status = box.service.status(spawned.session_id)[0];
+    assert.equal(status?.todo_list, undefined);
+  } finally {
+    await box.service.shutdown();
+  }
+});
