@@ -8,6 +8,12 @@ import type { HostFrame } from "./host.ts";
  * A `todos` event replaces the session's whole todo list on every event;
  * an empty list is a cleared list, and `muse_status` reports the same
  * latest list as `todo_list`.
+ * A `subscription-usage` event is account-scoped: its frame carries no
+ * session id, so the event has none either. `usage` is the host's
+ * subscription usage observation verbatim, point-in-time as of its own
+ * `observedAtMs` stamp. `muse_status` reports the session's latest
+ * context usage as `context_usage`, the reconciler for `context-usage`
+ * events after a reconnect.
  */
 export type StreamEventType =
   | "turn-started"
@@ -19,11 +25,14 @@ export type StreamEventType =
   | "pending"
   | "catalog-changed"
   | "goal-changed"
-  | "todos";
+  | "todos"
+  | "subscription-usage"
+  | "context-usage";
 
 export interface StreamEvent {
   type: StreamEventType;
-  sessionId: string;
+  /** The session the event belongs to. Absent on `subscription-usage`, which is account-scoped: its host frame carries no session id. */
+  sessionId?: string;
   /** Host view cursor, verbatim. Strictly monotonic per session. Present on item, usage, and turn-completed events; turn-started carries none. */
   viewCursor?: string;
   turnId?: string;
@@ -39,8 +48,14 @@ export interface StreamEvent {
   answer?: string;
   /** Delta events whose send failed during this turn. Loss is a value, never silent. */
   droppedDeltas?: number;
-  /** Raw usage params on usage events (`session/tokenUsage` or `usage/changed`). */
+  /** Raw usage params on usage events (`session/tokenUsage` or `usage/changed`). On `subscription-usage`, the host's subscription usage observation verbatim. */
   usage?: unknown;
+  /** Counted-once context tokens in use on context-usage. */
+  usedTokens?: number;
+  /** Effective context-window size on context-usage; absent when the host's basis has no limit — omitted, never invented. */
+  windowTokens?: number;
+  /** Host-computed context pressure level on context-usage, verbatim (open vocabulary). */
+  pressure?: string;
   /** Which host frame a usage event came from: a cumulative snapshot or a change notice. */
   usageKind?: "tokenUsage" | "changed";
   /** Pending hint fields. A hint means "refresh muse_pending"; muse_pending is the truth. */
@@ -65,6 +80,13 @@ export type StreamSink = (event: StreamEvent) => void | Promise<void>;
 export function translateFrame(frame: HostFrame): StreamEvent | undefined {
   const params = isRecord(frame.params) ? frame.params : undefined;
   if (!params) return undefined;
+  // `usage/changed` params ARE the subscription usage observation
+  // (window + weekly blocks) — account-scoped, with no sessionId. The
+  // shape is the gate: a session-carrying usage/changed frame without
+  // those blocks keeps the legacy `usage` translation below.
+  if (frame.method === "usage/changed" && isRecord(params.window) && isRecord(params.weekly)) {
+    return { type: "subscription-usage", usage: params };
+  }
   const sessionId = str(params, "sessionId");
   if (!sessionId) return undefined;
   const base: StreamEvent = { type: "usage", sessionId };
@@ -124,6 +146,17 @@ export function translateFrame(frame: HostFrame): StreamEvent | undefined {
       return { ...base, type: "catalog-changed", catalog: "plugin" };
     case "session/goalChanged":
       return { ...base, type: "goal-changed", goal: params.goal ?? null };
+    case "session/contextUsage": {
+      // usedTokens is the fact; a frame without it carries nothing to
+      // forward. windowTokens stays absent when the host's basis has
+      // no limit, and pressure passes through verbatim.
+      if (typeof params.usedTokens !== "number") return undefined;
+      const event: StreamEvent = { ...base, type: "context-usage", usedTokens: params.usedTokens };
+      if (typeof params.windowTokens === "number") event.windowTokens = params.windowTokens;
+      const pressure = str(params, "pressure");
+      if (pressure) event.pressure = pressure;
+      return event;
+    }
     case "session/todoListChanged": {
       // The list is the event: a frame without an items array carries
       // no snapshot and translates to nothing. An empty array is a
@@ -165,7 +198,7 @@ export class Coalescer {
 
   push(event: StreamEvent): void {
     if (event.type !== "item-delta") {
-      this.flushSession(event.sessionId);
+      this.flushSession(event.sessionId ?? "");
       this.sink(event);
       return;
     }

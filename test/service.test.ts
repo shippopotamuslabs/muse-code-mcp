@@ -805,6 +805,56 @@ test("todoListChanged notices reach the stream sink in order, and muse_status re
   }
 });
 
+test("context usage reaches the stream sink and muse_status; subscription observations arrive once per content", async () => {
+  const box = harness("usage-detail");
+  const events: StreamEvent[] = [];
+  box.service.setStreamSink((event) => {
+    events.push(event);
+  });
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+    assert.equal(spawned.status, "completed");
+    await until(() => events.filter((event) => event.type === "subscription-usage").length === 2);
+    const context = events.filter((event) => event.type === "context-usage");
+    assert.equal(context.length, 1);
+    assert.equal(context[0]?.sessionId, spawned.session_id);
+    assert.equal(context[0]?.usedTokens, 12000);
+    assert.equal(context[0]?.windowTokens, 200000);
+    assert.equal(context[0]?.pressure, "normal");
+
+    // The fake host sent the first observation twice (two hosts' arrival
+    // stamps, identical content): exactly two events survive — the first
+    // observation and the genuinely new one. Neither carries a session.
+    const subs = events.filter((event) => event.type === "subscription-usage");
+    assert.ok(subs.every((event) => event.sessionId === undefined));
+    assert.deepEqual(
+      subs.map((event) => (event.usage as { window: { usedPercent: number } }).window.usedPercent),
+      [9, 42],
+    );
+
+    // muse_status reports the latest context usage from the fold.
+    const status = box.service.status(spawned.session_id)[0];
+    const reported = status?.context_usage as { usedTokens?: unknown; windowTokens?: unknown; pressure?: unknown } | undefined;
+    assert.equal(reported?.usedTokens, 12000);
+    assert.equal(reported?.windowTokens, 200000);
+    assert.equal(reported?.pressure, "normal");
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("muse_status leaves context_usage absent when no context fact has landed", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+    assert.equal(spawned.status, "completed");
+    const status = box.service.status(spawned.session_id)[0];
+    assert.equal(status?.context_usage, undefined);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
 test("muse_status leaves todo_list absent when no todo fact has landed", async () => {
   const box = harness("ok");
   try {
