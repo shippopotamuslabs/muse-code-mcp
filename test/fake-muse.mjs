@@ -225,6 +225,13 @@ function afterStart(sessionId, turnId) {
     askUser(sessionId, turnId);
     return;
   }
+  if (scenario === "catalog-changed") {
+    beginTurn(sessionId, turnId);
+    completeTurn(sessionId, turnId, "MSP OK");
+    notify("skill/changed", { sessionId });
+    notify("plugin/changed", { sessionId, id: "acme", version: "1.2.0", source: "marketplace", enabled: true });
+    return;
+  }
   beginTurn(sessionId, turnId);
   completeTurn(sessionId, turnId, "MSP OK");
 }

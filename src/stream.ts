@@ -13,7 +13,8 @@ export type StreamEventType =
   | "item-completed"
   | "turn-completed"
   | "usage"
-  | "pending";
+  | "pending"
+  | "catalog-changed";
 
 export interface StreamEvent {
   type: StreamEventType;
@@ -41,6 +42,8 @@ export interface StreamEvent {
   requestId?: string;
   kind?: "approval" | "userInput";
   phase?: "requested" | "settled";
+  /** Which catalog a catalog-changed event names. A hint means "re-issue the matching list tool": `skill` refreshes muse_skills, `plugin` refreshes muse_plugins (plus muse_hooks and muse_skills, whose sets follow plugin installs). */
+  catalog?: "skill" | "plugin";
 }
 
 export type StreamSink = (event: StreamEvent) => void | Promise<void>;
@@ -102,6 +105,10 @@ export function translateFrame(frame: HostFrame): StreamEvent | undefined {
       if (!requestId) return undefined;
       return { ...base, type: "pending", requestId, kind: "userInput", phase: "settled" };
     }
+    case "skill/changed":
+      return { ...base, type: "catalog-changed", catalog: "skill" };
+    case "plugin/changed":
+      return { ...base, type: "catalog-changed", catalog: "plugin" };
     default:
       return undefined;
   }

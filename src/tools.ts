@@ -16,16 +16,33 @@ const effort = z.enum(REASONING_EFFORTS);
 const approval = z.enum(APPROVAL_MODES);
 const actor = z.enum(["user", "orchestrator"]);
 
+/**
+ * Ordered turn content parts. A text part is prompt text; a skill part
+ * invokes a `muse_skills` selector with an optional picked-copy source and
+ * free-text arguments. Image and video parts stay `muse_raw` only.
+ */
+const turnPart = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: z.string() }),
+  z.object({
+    type: z.literal("skill"),
+    selector: z.string().min(1, "skill part requires selector"),
+    source: z.enum(["bundled", "user", "project", "plugin"]).optional(),
+    arguments: z.string().optional(),
+  }),
+]);
+const turnParts = z.array(turnPart).optional();
+
 export function registerTools(mcp: McpServer, service: MuseService): void {
   mcp.registerTool(
     "muse_spawn",
     {
       description:
-        "Start a Muse session on a workspace and optionally send its first turn. Returns immediately unless wait is true. wait is only for short turns; the MCP client's own timeout still bounds the call.",
+        "Start a Muse session on a workspace and optionally send its first turn. Returns immediately unless wait is true. wait is only for short turns; the MCP client's own timeout still bounds the call. parts sends ordered text/skill parts verbatim; when parts is non-empty, prompt and prompt_file are ignored.",
       inputSchema: {
         workspace: z.string().describe("Absolute path of an existing workspace directory"),
         prompt: z.string().optional(),
         prompt_file: z.string().optional().describe("Absolute path of a prompt file"),
+        parts: turnParts.describe("Ordered text/skill parts; non-empty parts wins over prompt and prompt_file"),
         model: z.string().optional(),
         reasoning_effort: effort.optional(),
         preset: z.string().optional(),
@@ -49,11 +66,13 @@ export function registerTools(mcp: McpServer, service: MuseService): void {
   mcp.registerTool(
     "muse_turn",
     {
-      description: "Send a follow-up turn to a session this server started.",
+      description:
+        "Send a follow-up turn to a session this server started. parts sends ordered text/skill parts verbatim; when parts is non-empty, prompt and prompt_file are ignored.",
       inputSchema: {
         session_id: z.string(),
         prompt: z.string().optional(),
         prompt_file: z.string().optional(),
+        parts: turnParts.describe("Ordered text/skill parts; non-empty parts wins over prompt and prompt_file"),
         reasoning_effort: effort.optional(),
         wait: z.boolean().optional(),
       },

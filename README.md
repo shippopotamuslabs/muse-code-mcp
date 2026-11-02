@@ -61,7 +61,7 @@ One `muse serve` host is kept per workspace + contributor mode + preset + trust.
 
 The catalog tools — `muse_skills`, `muse_mcp_servers`, `muse_plugins`, and `muse_hooks` — each take a `session_id` and run one per-session MSP list query (`skill/list`, `mcpServer/list`, `plugin/list`, `hook/list`). Skill scope follows the session's workspace and plugin state, so a client re-lists on the host's `skill/changed` and `plugin/changed` notices. `muse_skills` rows carry `selector` (the shortcut token, without the slash), `display_name`, `description`, `source`, `plugin_id`, `argument_hint`, and `title`. `muse_mcp_servers` wraps an experimental method: its result shape is not in the stable SDK types, so each row normalizes `name`, `status`, and `transport` and carries the host row verbatim under `raw`. All four are read-only queries: no session record, no audit line.
 
-`muse_spawn` arguments: `workspace` (required, absolute, must exist), `prompt` or `prompt_file`, `model`, `reasoning_effort` (`none|minimal|low|medium|high|xhigh|max|ultra`), `preset`, `worktree` (`off|create|existing`) with `worktree_base` or `worktree_path`, `approval_mode` (`yolo|on-request|judge`), `contributor_mode` (default false), `wait` (default false). There is no `output_schema` argument. MSP has no field for it.
+`muse_spawn` arguments: `workspace` (required, absolute, must exist), `prompt` or `prompt_file`, `parts` (ordered `text`/`skill` objects; non-empty `parts` wins over `prompt` and `prompt_file`), `model`, `reasoning_effort` (`none|minimal|low|medium|high|xhigh|max|ultra`), `preset`, `worktree` (`off|create|existing`) with `worktree_base` or `worktree_path`, `approval_mode` (`yolo|on-request|judge`), `contributor_mode` (default false), `wait` (default false). There is no `output_schema` argument. MSP has no field for it. `muse_turn` takes `session_id` plus the same `prompt`/`prompt_file`/`parts` choice. A skill part names a `muse_skills` `selector` with an optional `source` (`bundled|user|project|plugin`) and free-text `arguments`; the host resolves and expands it, and an unknown selector fails the turn with `skillNotFound`.
 
 `muse_message` takes `action` `list` or `send`. `send` requires `target` (a session uuid or name) and `body` (written to the CLI's stdin, max 64 KiB). Optional `in_reply_to` and `display_context` (a JSON object). Every call passes `--json` and returns `{action, exit_code, result, stderr}`. `result` is the stdout JSON. A non-zero exit whose stdout is JSON is a normal result, including closed ingress:
 
@@ -96,7 +96,7 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 
 | Field | Meaning |
 | --- | --- |
-| `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, or `pending`. |
+| `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, `pending`, or `catalog-changed`. |
 | `sessionId` | The session the event belongs to. Events cover every session on the connection. |
 | `turnId` | Present when the host frame carries one. |
 | `viewCursor` | The host view cursor, verbatim, on item, usage, and turn-completed events (`turn-started` carries none). Strictly increasing per session; a jump means a gap. |
@@ -106,6 +106,7 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 | `droppedDeltas` | On `turn-completed`: delta events whose send failed during that turn. `muse_status` reports the same count cumulatively as `stream_dropped_deltas`. |
 | `usage`, `usageKind` | On `usage`: the host's raw token-usage params, plus which frame they came from: `tokenUsage` (a cumulative snapshot) or `changed` (a change notice). |
 | `requestId`, `kind`, `phase` | On `pending`: a hint that an approval or user-input request was `requested` or `settled`. |
+| `catalog` | On `catalog-changed`: which catalog changed, `skill` (re-issue `muse_skills`) or `plugin` (re-issue `muse_plugins`, plus `muse_hooks` and `muse_skills`). |
 
 Client guidance:
 
