@@ -77,6 +77,27 @@ test("skill and plugin changed frames become catalog-changed events", () => {
   );
 });
 
+test("session goalChanged frames become goal-changed events with the block verbatim", () => {
+  const goal = {
+    objective: "Ship the slice",
+    percentComplete: 150,
+    status: "in-progress",
+    currentWork: "wiring the fold",
+    nextWork: "docs",
+    createdAtMs: 1,
+    updatedAtMs: 2,
+  };
+  assert.deepEqual(
+    translateFrame({ method: "session/goalChanged", params: { sessionId: "s1", viewCursor: "c1", goal } }),
+    { type: "goal-changed", sessionId: "s1", viewCursor: "c1", goal },
+  );
+  assert.deepEqual(translateFrame({ method: "session/goalChanged", params: { sessionId: "s1", goal: null } }), {
+    type: "goal-changed",
+    sessionId: "s1",
+    goal: null,
+  });
+});
+
 test("unmapped frames and frames without a session translate to nothing", () => {
   assert.equal(translateFrame({ method: "session/updated", params: { sessionId: "s1" } }), undefined);
   assert.equal(translateFrame({ method: "item/delta", params: { itemId: "i1", delta: "x" } }), undefined);

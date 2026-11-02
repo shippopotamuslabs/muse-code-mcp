@@ -14,7 +14,8 @@ export type StreamEventType =
   | "turn-completed"
   | "usage"
   | "pending"
-  | "catalog-changed";
+  | "catalog-changed"
+  | "goal-changed";
 
 export interface StreamEvent {
   type: StreamEventType;
@@ -44,6 +45,8 @@ export interface StreamEvent {
   phase?: "requested" | "settled";
   /** Which catalog a catalog-changed event names. A hint means "re-issue the matching list tool": `skill` refreshes muse_skills, `plugin` refreshes muse_plugins (plus muse_hooks and muse_skills, whose sets follow plugin installs). */
   catalog?: "skill" | "plugin";
+  /** Full goal block on goal-changed, verbatim from `session/goalChanged` (`null` clears). Percent and status pass through unnormalized; clamping is the renderer's job. */
+  goal?: unknown;
 }
 
 export type StreamSink = (event: StreamEvent) => void | Promise<void>;
@@ -109,6 +112,8 @@ export function translateFrame(frame: HostFrame): StreamEvent | undefined {
       return { ...base, type: "catalog-changed", catalog: "skill" };
     case "plugin/changed":
       return { ...base, type: "catalog-changed", catalog: "plugin" };
+    case "session/goalChanged":
+      return { ...base, type: "goal-changed", goal: params.goal ?? null };
     default:
       return undefined;
   }

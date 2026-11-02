@@ -741,3 +741,27 @@ test("catalog-changed notices reach the stream sink in host order", async () => 
     await box.service.shutdown();
   }
 });
+
+test("goalChanged notices reach the stream sink verbatim, null for a clear", async () => {
+  const box = harness("goal-changed");
+  const events: StreamEvent[] = [];
+  box.service.setStreamSink((event) => {
+    events.push(event);
+  });
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+    assert.equal(spawned.status, "completed");
+    await until(() => events.filter((event) => event.type === "goal-changed").length === 2);
+    const changed = events.filter((event) => event.type === "goal-changed");
+    assert.ok(changed.every((event) => event.sessionId === spawned.session_id));
+    assert.deepEqual(changed[0]?.goal, {
+      objective: "Ship the slice",
+      percentComplete: 150,
+      status: "weird-status",
+      currentWork: "wiring the fold",
+    });
+    assert.equal(changed[1]?.goal, null);
+  } finally {
+    await box.service.shutdown();
+  }
+});
