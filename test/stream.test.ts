@@ -38,6 +38,51 @@ test("usage frames carry the raw params and say which frame they were", () => {
   assert.equal(changed?.usageKind, "changed");
 });
 
+test("a subscription-shaped usage/changed frame becomes an account-scoped subscription-usage event", () => {
+  const params = {
+    observedAtMs: 1762300000000,
+    tier: "power",
+    window: { usedPercent: 9, resetsAtMs: 1762312500000, windowDurationMins: 300 },
+    weekly: { usedPercent: 70, resetsAtMs: 1762600000000 },
+  };
+  const event = translateFrame({ method: "usage/changed", params });
+  assert.equal(event?.type, "subscription-usage");
+  assert.equal(event?.sessionId, undefined);
+  assert.deepEqual(event?.usage, params);
+  // The shape is the gate, not the routing: even with a sessionId present,
+  // a subscription observation is account-scoped and carries no session.
+  const routed = translateFrame({ method: "usage/changed", params: { ...params, sessionId: "s1" } });
+  assert.equal(routed?.type, "subscription-usage");
+  assert.equal(routed?.sessionId, undefined);
+});
+
+test("contextUsage frames become context-usage events; windowTokens stays absent when the basis has no limit", () => {
+  const withWindow = translateFrame({
+    method: "session/contextUsage",
+    params: { sessionId: "s1", viewCursor: "c7", usedTokens: 12000, windowTokens: 200000, pressure: "normal" },
+  });
+  assert.deepEqual(withWindow, {
+    type: "context-usage",
+    sessionId: "s1",
+    viewCursor: "c7",
+    usedTokens: 12000,
+    windowTokens: 200000,
+    pressure: "normal",
+  });
+  const windowless = translateFrame({
+    method: "session/contextUsage",
+    params: { sessionId: "s1", viewCursor: "c8", usedTokens: 300, pressure: "warning" },
+  });
+  assert.equal(windowless?.type, "context-usage");
+  assert.equal(windowless?.usedTokens, 300);
+  assert.equal(windowless?.windowTokens, undefined);
+  // A frame without usedTokens carries no fact and translates to nothing.
+  assert.equal(
+    translateFrame({ method: "session/contextUsage", params: { sessionId: "s1", pressure: "normal" } }),
+    undefined,
+  );
+});
+
 test("approval and user-input frames become pending hints", () => {
   assert.deepEqual(
     translateFrame({ method: "approval/requested", params: { sessionId: "s1", approvalId: "a1" } }),

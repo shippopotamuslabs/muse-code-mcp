@@ -80,6 +80,8 @@ export interface StatusResult {
   token_usage?: unknown;
   /** Latest todo list from the fold (`TodoListState` or the last `session/todoListChanged` params); absent when no todo fact has landed. */
   todo_list?: unknown;
+  /** Latest context usage from the fold (the last `session/contextUsage` params); absent when no context fact has landed. */
+  context_usage?: unknown;
   pending_approvals: number;
   pending_user_inputs: number;
   fingerprint_warning?: string;
@@ -209,6 +211,8 @@ export class MuseService {
   private readonly live = new Map<string, Live>();
   private readonly held = new Map<string, HostFrame[]>();
   private readonly seenApprovals = new Set<string>();
+  /** Content keys of subscription usage observations already emitted to the stream. Hosts are per workspace posture but the account is one, so the same observation can arrive once per host. */
+  private readonly seenSubscription = new Set<string>();
   private opening = 0;
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly coalescer: Coalescer;
@@ -664,7 +668,12 @@ export class MuseService {
   private route(frame: HostFrame): void {
     const params = isRecord(frame.params) ? frame.params : undefined;
     const sessionId = params && typeof params.sessionId === "string" ? params.sessionId : undefined;
-    if (!sessionId) return;
+    if (!sessionId) {
+      // The one sessionless frame with a stream surface: a subscription
+      // usage observation belongs to the account, not to any session.
+      if (frame.method === "usage/changed") this.emitSubscription(frame);
+      return;
+    }
     const live = this.live.get(sessionId);
     if (live && !live.host.isDead) {
       this.deliver(live, frame);
@@ -732,7 +741,43 @@ export class MuseService {
       if (live.pendingHints.has(key)) return;
       live.pendingHints.add(key);
     }
+    if (event.type === "subscription-usage" && !this.claimSubscription(event)) return;
     this.coalescer.push(event);
+  }
+
+  /** Forward a sessionless subscription usage observation to stream clients. */
+  private emitSubscription(frame: HostFrame): void {
+    if (!this.streamSink) return;
+    const event = translateFrame(frame);
+    if (!event || event.type !== "subscription-usage") return;
+    if (!this.claimSubscription(event)) return;
+    this.coalescer.push(event);
+  }
+
+  /**
+   * Claim one subscription observation for emission, keyed on its content
+   * (tier, both windows' percents and reset stamps). `observedAtMs` cannot
+   * be the key: each host stamps its own arrival time, so the same provider
+   * observation arrives with different stamps from different hosts.
+   */
+  private claimSubscription(event: Parameters<StreamSink>[0]): boolean {
+    const usage = isRecord(event.usage) ? event.usage : undefined;
+    const window = usage && isRecord(usage.window) ? usage.window : undefined;
+    const weekly = usage && isRecord(usage.weekly) ? usage.weekly : undefined;
+    const key = JSON.stringify([
+      usage?.tier,
+      window?.usedPercent,
+      window?.resetsAtMs,
+      weekly?.usedPercent,
+      weekly?.resetsAtMs,
+    ]);
+    if (this.seenSubscription.has(key)) return false;
+    this.seenSubscription.add(key);
+    if (this.seenSubscription.size > 64) {
+      const oldest = this.seenSubscription.values().next().value;
+      if (oldest !== undefined) this.seenSubscription.delete(oldest);
+    }
+    return true;
   }
 
   /** Send one stream event. A failing client never blocks or breaks the host pump. */
@@ -749,7 +794,7 @@ export class MuseService {
     // have run its failure handler yet when this event is reached. The wait
     // is capped; sends that outlive it settle into the cumulative count in
     // muse_status instead. If this send itself fails, the count goes with it.
-    const live = this.live.get(event.sessionId);
+    const live = event.sessionId ? this.live.get(event.sessionId) : undefined;
     const pending = live ? [...live.pendingDeltaSends] : [];
     if (!live || pending.length === 0) {
       if (live) event.droppedDeltas = live.streamDroppedTurn;
@@ -776,7 +821,7 @@ export class MuseService {
         (error: unknown) => this.streamFailed(event, error),
       );
       if (event.type === "item-delta") {
-        const live = this.live.get(event.sessionId);
+        const live = event.sessionId ? this.live.get(event.sessionId) : undefined;
         if (live) {
           live.pendingDeltaSends.add(tracked);
           void tracked.then(() => live.pendingDeltaSends.delete(tracked));
@@ -788,7 +833,7 @@ export class MuseService {
   }
 
   private streamFailed(event: Parameters<StreamSink>[0], error: unknown): void {
-    const live = this.live.get(event.sessionId);
+    const live = event.sessionId ? this.live.get(event.sessionId) : undefined;
     if (!live) return;
     if (event.type === "item-delta") {
       live.streamDroppedTurn += 1;
@@ -893,6 +938,7 @@ export class MuseService {
     const pending = this.broker.list().filter((item) => item.sessionId === record.sessionId);
     const usage = live ? live.sdk.fold.sessionState.get("session/tokenUsage") : undefined;
     const todos = live ? live.sdk.fold.sessionState.get("session/todoListChanged") : undefined;
+    const context = live ? live.sdk.fold.sessionState.get("session/contextUsage") : undefined;
     return {
       session_id: record.sessionId,
       status: record.status,
@@ -906,6 +952,7 @@ export class MuseService {
       preset: record.preset,
       token_usage: usage,
       todo_list: todos,
+      context_usage: context,
       pending_approvals: pending.filter((item) => item.kind === "approval").length,
       pending_user_inputs: pending.filter((item) => item.kind === "userInput").length,
       fingerprint_warning: live?.host.fingerprintWarning ?? record.fingerprintWarning,

@@ -244,6 +244,39 @@ function afterStart(sessionId, turnId) {
     notify("session/goalChanged", { sessionId, viewCursor: "c100", goal: null, sourceRange: { from: "r3", to: "r4" } });
     return;
   }
+  if (scenario === "usage-detail") {
+    beginTurn(sessionId, turnId);
+    notify("session/contextUsage", {
+      sessionId,
+      ...range(),
+      usedTokens: 12000,
+      windowTokens: 200000,
+      pressure: "normal",
+    });
+    completeTurn(sessionId, turnId, "MSP OK");
+    // Account-scoped: no sessionId. The same observation twice (the second
+    // host's own arrival stamp differs; the content is identical), then a
+    // genuinely new observation.
+    notify("usage/changed", {
+      observedAtMs: 1762300000000,
+      tier: "power",
+      window: { usedPercent: 9, resetsAtMs: 1762312500000, windowDurationMins: 300 },
+      weekly: { usedPercent: 70, resetsAtMs: 1762600000000 },
+    });
+    notify("usage/changed", {
+      observedAtMs: 1762300000500,
+      tier: "power",
+      window: { usedPercent: 9, resetsAtMs: 1762312500000, windowDurationMins: 300 },
+      weekly: { usedPercent: 70, resetsAtMs: 1762600000000 },
+    });
+    notify("usage/changed", {
+      observedAtMs: 1762300060000,
+      tier: "power",
+      window: { usedPercent: 42, resetsAtMs: 1762312500000, windowDurationMins: 300 },
+      weekly: { usedPercent: 71, resetsAtMs: 1762600000000 },
+    });
+    return;
+  }
   if (scenario === "todos") {
     beginTurn(sessionId, turnId);
     notify("session/todoListChanged", {
