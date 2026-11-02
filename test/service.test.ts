@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { ensureHome } from "../src/config.ts";
 import { readAudit } from "../src/audit.ts";
-import { approvalFailureEvent, MuseService } from "../src/sessions.ts";
+import { approvalFailureEvent, MuseService, type TurnPart } from "../src/sessions.ts";
 import type { StreamEvent } from "../src/stream.ts";
 
 const FAKE = join(import.meta.dirname, "fake-muse.mjs");
@@ -622,6 +622,121 @@ test("mcp servers rejects a result with no servers array", async () => {
   try {
     const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "hi", wait: true });
     await assert.rejects(() => box.service.mcpServers(spawned.session_id), /no servers array for mcpServer\/list/);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("skill parts reach the fake host turn/start input verbatim with text order kept", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({
+      workspace: box.workspace,
+      parts: [
+        { type: "text", text: "look at @src/main.ts" },
+        { type: "skill", selector: "acme:deploy", source: "plugin", arguments: "staging" },
+        { type: "text", text: "then summarize" },
+      ],
+      wait: true,
+    });
+    assert.equal(spawned.status, "completed");
+    const starts = box.methods().filter((entry) => entry.method === "turn/start");
+    assert.equal(starts.length, 1);
+    assert.deepEqual(starts[0]?.params.input, [
+      { type: "text", text: "look at @src/main.ts" },
+      { type: "skill", selector: "acme:deploy", source: "plugin", arguments: "staging" },
+      { type: "text", text: "then summarize" },
+    ]);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("a turn with a bare skill part sends the part without optional fields", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace });
+    const followed = await box.service.turn({
+      session_id: spawned.session_id,
+      parts: [{ type: "skill", selector: "fix-bug" }],
+      wait: true,
+    });
+    assert.equal(followed.status, "completed");
+    const starts = box.methods().filter((entry) => entry.method === "turn/start");
+    assert.equal(starts.length, 1);
+    assert.deepEqual(starts[0]?.params.input, [{ type: "skill", selector: "fix-bug" }]);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("non-empty parts wins over prompt and prompt_file", async () => {
+  const box = harness("ok");
+  try {
+    const promptFile = join(box.workspace, "prompt.txt");
+    writeFileSync(promptFile, "file-ignored");
+    const spawned = await box.service.spawn({
+      workspace: box.workspace,
+      prompt: "ignored",
+      prompt_file: promptFile,
+      parts: [{ type: "text", text: "used" }],
+      wait: true,
+    });
+    assert.equal(spawned.status, "completed");
+    const starts = box.methods().filter((entry) => entry.method === "turn/start");
+    assert.equal(starts.length, 1);
+    assert.deepEqual(starts[0]?.params.input, [{ type: "text", text: "used" }]);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("malformed parts are rejected before any frame is sent", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace });
+    await assert.rejects(
+      () => box.service.turn({ session_id: spawned.session_id, parts: [{ type: "skill", selector: "" }] }),
+      /selector/,
+    );
+    await assert.rejects(
+      () =>
+        box.service.turn({
+          session_id: spawned.session_id,
+          parts: [{ type: "skill", selector: "fix-bug", source: "nope" } as unknown as TurnPart],
+        }),
+      /source/,
+    );
+    await assert.rejects(
+      () =>
+        box.service.turn({
+          session_id: spawned.session_id,
+          parts: [{ type: "image" } as unknown as TurnPart],
+        }),
+      /unknown type/,
+    );
+    assert.equal(
+      box.methods().some((entry) => entry.method === "turn/start"),
+      false,
+    );
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("catalog-changed notices reach the stream sink in host order", async () => {
+  const box = harness("catalog-changed");
+  const events: StreamEvent[] = [];
+  box.service.setStreamSink((event) => {
+    events.push(event);
+  });
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+    assert.equal(spawned.status, "completed");
+    await until(() => events.filter((event) => event.type === "catalog-changed").length === 2);
+    const changed = events.filter((event) => event.type === "catalog-changed");
+    assert.deepEqual(changed.map((event) => event.catalog), ["skill", "plugin"]);
+    assert.ok(changed.every((event) => event.sessionId === spawned.session_id));
   } finally {
     await box.service.shutdown();
   }
