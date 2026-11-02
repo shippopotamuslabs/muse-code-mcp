@@ -223,6 +223,24 @@ export function registerTools(mcp: McpServer, service: MuseService): void {
   );
 
   mcp.registerTool(
+    "muse_models",
+    {
+      description: "List the host model catalog. Pass workspace or session_id; session_id flags the session's model active.",
+      inputSchema: {
+        workspace: z.string().optional().describe("Absolute path of an existing workspace directory"),
+        session_id: z.string().optional(),
+      },
+    },
+    async (args) => {
+      try {
+        return ok(await service.models(args));
+      } catch (error) {
+        return fail(error);
+      }
+    },
+  );
+
+  mcp.registerTool(
     "muse_raw",
     {
       description:

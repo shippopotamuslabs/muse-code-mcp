@@ -69,6 +69,35 @@ export interface ResultView {
   events: { method: string; at: string }[];
 }
 
+export interface ModelsInput {
+  workspace?: string;
+  session_id?: string;
+}
+
+export interface ModelView {
+  id: string;
+  display_label: string;
+  description: string | null;
+  is_default: boolean;
+  is_active: boolean;
+  provider_id: string;
+  profile_id: string | null;
+  context_limit: number | null;
+  output_limit: number | null;
+  release_date: string | null;
+  cost: unknown;
+  default_reasoning_effort?: string;
+  reasoning_efforts?: unknown;
+  reasoning_effort_variants?: unknown;
+}
+
+export interface ModelsResult {
+  models: ModelView[];
+  provider_id: string;
+  profile_id: string | null;
+  source: string;
+}
+
 interface Live {
   record: SessionRecord;
   host: MuseHost;
@@ -302,6 +331,28 @@ export class MuseService {
     }
     const live = await this.ensure(sessionId);
     return live.host.connection.request(method, params);
+  }
+
+  /** List the host model catalog. Read-only: writes no audit line and no session record. */
+  async models(input: ModelsInput): Promise<ModelsResult> {
+    const host = await this.modelsHost(input);
+    const params = input.session_id !== undefined ? { sessionId: input.session_id } : {};
+    const raw = await host.connection.request("model/list", params);
+    return decodeModels(raw);
+  }
+
+  private async modelsHost(input: ModelsInput): Promise<MuseHost> {
+    if (input.session_id !== undefined) return (await this.ensure(input.session_id)).host;
+    if (input.workspace !== undefined) {
+      return this.hostFor({
+        workspace: requireWorkspace(input.workspace),
+        contributorMode: false,
+        trustWorkspace: true,
+      });
+    }
+    const live = [...this.hosts.values()].find((candidate) => !candidate.isDead);
+    if (!live) throw new Error("models requires workspace or session_id: no live host to list models from");
+    return live;
   }
 
   /** List or send `muse session-message`. Does not touch hosts this server spawned. */
@@ -835,6 +886,50 @@ function worktreeParam(input: SpawnInput): Record<string, unknown> | undefined {
   if (mode === "create") return input.worktree_base ? { mode: "create", baseRef: input.worktree_base } : { mode: "create" };
   if (!input.worktree_path) throw new Error("worktree existing requires worktree_path");
   return { mode: "existing", path: input.worktree_path };
+}
+
+function decodeModels(raw: Record<string, unknown>): ModelsResult {
+  if (!Array.isArray(raw.models)) throw new Error("MSP result has no models array for model/list");
+  const models: ModelView[] = [];
+  for (const row of raw.models) {
+    const view = decodeModelView(row);
+    if (view) models.push(view);
+  }
+  return {
+    models,
+    provider_id: catalogString(raw, "providerId"),
+    profile_id: typeof raw.profileId === "string" ? raw.profileId : null,
+    source: catalogString(raw, "source"),
+  };
+}
+
+function catalogString(raw: Record<string, unknown>, field: "providerId" | "source"): string {
+  const value = raw[field];
+  if (typeof value !== "string") throw new Error(`MSP result has no ${field} for model/list`);
+  return value;
+}
+
+function decodeModelView(row: unknown): ModelView | undefined {
+  if (!isRecord(row) || typeof row.modelId !== "string") return undefined;
+  const view: ModelView = {
+    id: row.modelId,
+    display_label: typeof row.displayLabel === "string" ? row.displayLabel : row.modelId,
+    description: typeof row.description === "string" ? row.description : null,
+    is_default: typeof row.isDefault === "boolean" ? row.isDefault : false,
+    is_active: typeof row.isActive === "boolean" ? row.isActive : false,
+    provider_id: typeof row.providerId === "string" ? row.providerId : "",
+    profile_id: typeof row.profileId === "string" ? row.profileId : null,
+    context_limit: typeof row.contextLimit === "number" ? row.contextLimit : null,
+    output_limit: typeof row.outputLimit === "number" ? row.outputLimit : null,
+    release_date: typeof row.releaseDate === "string" ? row.releaseDate : null,
+    cost: "cost" in row ? row.cost : null,
+  };
+  if ("defaultReasoningEffort" in row && typeof row.defaultReasoningEffort === "string") {
+    view.default_reasoning_effort = row.defaultReasoningEffort;
+  }
+  if ("variants" in row) view.reasoning_efforts = row.variants;
+  if ("reasoningEffortVariants" in row) view.reasoning_effort_variants = row.reasoningEffortVariants;
+  return view;
 }
 
 function sessionIdOf(raw: Record<string, unknown>): string {

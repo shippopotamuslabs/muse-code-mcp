@@ -305,6 +305,53 @@ async function handle(msg) {
     });
     return;
   }
+  if (method === "model/list") {
+    const top = { providerId: "fake", profileId: null, source: "fakeCatalog" };
+    if (scenario === "models-empty") {
+      reply(msg.id, params, { ...top, models: [] });
+      return;
+    }
+    if (scenario === "models-no-identity") {
+      reply(msg.id, params, { models: [], profileId: null, source: "fakeCatalog" });
+      return;
+    }
+    const active = typeof params.sessionId === "string" && params.sessionId.length > 0;
+    reply(msg.id, params, {
+      ...top,
+      models: [
+        {
+          modelId: "muse-spark-1.3",
+          displayLabel: "Muse Spark 1.3",
+          description: "Fast model for everyday coding",
+          isDefault: true,
+          isActive: active,
+          providerId: "fake",
+          profileId: null,
+          contextLimit: 200000,
+          outputLimit: 32000,
+          releaseDate: "2026-01-01",
+          cost: { cached: "0.15", currency: "USD", input: "0.30", output: "1.20" },
+          defaultReasoningEffort: "high",
+          reasoningEffortVariants: [{ tier: "high", description: "Thorough reasoning" }],
+          variants: ["minimal", "low", "medium", "high"],
+        },
+        {
+          modelId: "muse-wonder-full-1.0",
+          displayLabel: "Muse Wonder Full 1.0",
+          description: null,
+          isDefault: false,
+          isActive: false,
+          providerId: "fake",
+          profileId: null,
+          contextLimit: null,
+          outputLimit: null,
+          releaseDate: null,
+          cost: null,
+        },
+      ],
+    });
+    return;
+  }
   reply(msg.id, params, { ok: true, method, params });
 }
 
