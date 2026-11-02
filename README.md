@@ -44,6 +44,7 @@ One `muse serve` host is kept per workspace + contributor mode + preset + trust.
 | `muse_answer` | Answer a pending question (`request_id`, `answer`). |
 | `muse_decide` | `approve` or `deny` a pending approval. Deny can include `reason`. |
 | `muse_status` | One session or all: state, turn, model, workspace, token usage, pending counts. |
+| `muse_models` | List the host model catalog. Optional `workspace` or `session_id`. |
 | `muse_result` | Latest completed turn, final answer text, and a short in-memory event tail. |
 | `muse_cancel` | Cancel the current turn. |
 | `muse_close` | End a session. |
@@ -51,6 +52,8 @@ One `muse serve` host is kept per workspace + contributor mode + preset + trust.
 | `muse_raw` | Send any MSP method with raw params. Credential methods are refused before a frame is written. |
 
 `muse_answer` and `muse_decide` take an optional `actor` of `user` or `orchestrator` (default `orchestrator`). Policy decisions are logged as `policy`. Unanswered approvals expire to deny and unanswered questions are cancelled after `pending_timeout_sec` (default 1800). If the MCP client advertises elicitation, pending items are also offered that way. The tools still work when it does not.
+
+`muse_models` takes optional `workspace` and `session_id`. Listing by workspace starts (or reuses) that workspace's host without creating a session. Passing `session_id` flags that session's model as active, so a picker can list before it has a session and then resolve the active row once it does. The result carries `models` (each with `id`, `display_label`, `is_default`, `is_active`, and the catalog's remaining fields) plus top-level `provider_id`, `profile_id`, and `source`. It is a read-only query: no session record, no audit line.
 
 `muse_spawn` arguments: `workspace` (required, absolute, must exist), `prompt` or `prompt_file`, `model`, `reasoning_effort` (`none|minimal|low|medium|high|xhigh|max|ultra`), `preset`, `worktree` (`off|create|existing`) with `worktree_base` or `worktree_path`, `approval_mode` (`yolo|on-request|judge`), `contributor_mode` (default false), `wait` (default false). There is no `output_schema` argument. MSP has no field for it.
 

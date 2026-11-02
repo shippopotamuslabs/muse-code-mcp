@@ -26,6 +26,7 @@ const NAMES = [
   "muse_cancel",
   "muse_close",
   "muse_message",
+  "muse_models",
   "muse_raw",
 ];
 
@@ -143,6 +144,37 @@ test("a client without the streaming capability receives no notifications", asyn
     const result = await client.callTool({ name: "muse_result", arguments: { session_id: sessionId } });
     const content = result.content as Array<{ type: string; text?: string }>;
     assert.equal((JSON.parse(content[0]?.text ?? "{}") as { answer: string }).answer, "MSP STREAM OK");
+  } finally {
+    await client.close();
+    await service.shutdown();
+  }
+});
+
+test("an MCP client calls muse_models by workspace", async () => {
+  const home = mkdtempSync(join(tmpdir(), "muse-mcp-models-"));
+  const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-ws-"));
+  const config = ensureHome(home, {});
+  const service = new MuseService({
+    home,
+    config,
+    bin: FAKE,
+    env: {
+      MUSE_FAKE_SCENARIO: "ok",
+      MUSE_FAKE_ARGV_LOG: join(home, "argv.log"),
+      MUSE_FAKE_METHOD_LOG: join(home, "methods.log"),
+    },
+    shutdownTimeoutMs: 0,
+  });
+  const mcp = createMcpServer(service);
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "muse-mcp-test", version: "0" });
+  try {
+    await Promise.all([mcp.connect(serverTransport), client.connect(clientTransport)]);
+    const result = await client.callTool({ name: "muse_models", arguments: { workspace } });
+    assert.equal(result.isError, undefined);
+    const content = result.content as Array<{ type: string; text?: string }>;
+    const parsed = JSON.parse(content[0]?.text ?? "{}") as { models: Array<{ id: string }> };
+    assert.equal(parsed.models[0]?.id, "muse-spark-1.3");
   } finally {
     await client.close();
     await service.shutdown();

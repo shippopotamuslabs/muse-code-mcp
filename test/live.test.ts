@@ -182,6 +182,23 @@ test("live stream delivers deltas that build the answer", { skip: !live, timeout
   }
 });
 
+test("live models lists the catalog without running a turn", { skip: !live, timeout: 60_000 }, async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-live-ws-"));
+  const { svc } = service();
+  try {
+    const listed = await svc.models({ workspace });
+    assert.ok(listed.models.length > 0);
+    assert.ok(listed.models.some((row) => row.id === "muse-spark-1.3"));
+    for (const row of listed.models) {
+      assert.ok(row.id.length > 0);
+      assert.ok(row.display_label.length > 0);
+    }
+    assert.ok(listed.source.length > 0);
+  } finally {
+    await svc.shutdown();
+  }
+});
+
 test("live session-message list reports closed ingress", { skip: !live, timeout: 30_000 }, async () => {
   const { svc } = service();
   try {

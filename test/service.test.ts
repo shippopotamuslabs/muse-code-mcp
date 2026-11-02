@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -402,6 +402,115 @@ test("muse_raw forwards compact and refuses login before any frame", async () =>
     const audit = readAudit(box.home);
     assert.equal(audit.some((event) => event.kind === "refuse"), true);
     assert.equal(JSON.stringify(audit).includes("nope"), false);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("models by workspace lists the catalog without a session", async () => {
+  const box = harness("ok");
+  try {
+    const listed = await box.service.models({ workspace: box.workspace });
+    assert.equal(listed.models.length, 2);
+    assert.equal(listed.models[0]?.id, "muse-spark-1.3");
+    assert.equal(listed.models[1]?.id, "muse-wonder-full-1.0");
+    assert.equal(listed.models[0]?.is_default, true);
+    assert.equal(listed.models[0]?.is_active, false);
+    assert.equal(listed.models[1]?.is_active, false);
+    assert.equal(listed.source, "fakeCatalog");
+    assert.equal(listed.provider_id, "fake");
+    assert.equal(listed.profile_id, null);
+    const lists = box.methods().filter((entry) => entry.method === "model/list");
+    assert.equal(lists.length, 1);
+    assert.equal("sessionId" in lists[0]?.params, false);
+    assert.deepEqual(box.service.status(), []);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("models by session flags the active model, and an unknown session sends no frame", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "hi", wait: true });
+    const listed = await box.service.models({ session_id: spawned.session_id });
+    assert.equal(listed.models.length, 2);
+    assert.equal(listed.models[0]?.id, "muse-spark-1.3");
+    assert.equal(listed.models[0]?.is_active, true);
+    assert.equal(listed.models[1]?.is_active, false);
+    const lists = box.methods().filter((entry) => entry.method === "model/list");
+    assert.equal(lists.length, 1);
+    assert.equal(lists[0]?.params.sessionId, spawned.session_id);
+    await assert.rejects(() => box.service.models({ session_id: "sess-does-not-exist" }), /unknown session/);
+    assert.equal(
+      box.methods().filter((entry) => entry.method === "model/list").length,
+      1,
+    );
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("models with no args reuses a live host, and fails cold without starting one", async () => {
+  const box = harness("ok");
+  try {
+    await box.service.spawn({ workspace: box.workspace, prompt: "hi", wait: true });
+    const listed = await box.service.models({});
+    assert.equal(listed.models.length, 2);
+    assert.equal(box.argv().length, 1);
+    const lists = box.methods().filter((entry) => entry.method === "model/list");
+    assert.equal(lists.length, 1);
+    assert.equal("sessionId" in lists[0]?.params, false);
+  } finally {
+    await box.service.shutdown();
+  }
+
+  const cold = harness("ok");
+  try {
+    await assert.rejects(() => cold.service.models({}), /workspace/);
+    assert.equal(existsSync(join(cold.home, "argv.log")), false);
+  } finally {
+    await cold.service.shutdown();
+  }
+});
+
+test("models rejects a catalog with no providerId", async () => {
+  const box = harness("models-no-identity");
+  try {
+    await assert.rejects(() => box.service.models({ workspace: box.workspace }), /providerId for model\/list/);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("models returns an empty catalog without error", async () => {
+  const box = harness("models-empty");
+  try {
+    const listed = await box.service.models({ workspace: box.workspace });
+    assert.deepEqual(listed.models, []);
+    assert.equal(listed.provider_id, "fake");
+    assert.equal(listed.profile_id, null);
+    assert.equal(listed.source, "fakeCatalog");
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("models mapping keeps display fields verbatim in snake_case", async () => {
+  const box = harness("ok");
+  try {
+    const listed = await box.service.models({ workspace: box.workspace });
+    const [spark, wonder] = listed.models;
+    assert.equal(wonder?.description, null);
+    assert.equal(wonder?.cost, null);
+    assert.deepEqual(spark?.cost, { cached: "0.15", currency: "USD", input: "0.30", output: "1.20" });
+    assert.equal(spark?.display_label, "Muse Spark 1.3");
+    assert.equal(spark?.default_reasoning_effort, "high");
+    assert.deepEqual(spark?.reasoning_efforts, ["minimal", "low", "medium", "high"]);
+    assert.deepEqual(spark?.reasoning_effort_variants, [{ tier: "high", description: "Thorough reasoning" }]);
+    for (const row of listed.models) {
+      assert.equal("modelId" in (row as unknown as Record<string, unknown>), false);
+    }
   } finally {
     await box.service.shutdown();
   }
