@@ -96,7 +96,7 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 
 | Field | Meaning |
 | --- | --- |
-| `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, `pending`, or `catalog-changed`. |
+| `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, `pending`, `catalog-changed`, or `goal-changed`. |
 | `sessionId` | The session the event belongs to. Events cover every session on the connection. |
 | `turnId` | Present when the host frame carries one. |
 | `viewCursor` | The host view cursor, verbatim, on item, usage, and turn-completed events (`turn-started` carries none). Strictly increasing per session; a jump means a gap. |
@@ -107,6 +107,7 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 | `usage`, `usageKind` | On `usage`: the host's raw token-usage params, plus which frame they came from: `tokenUsage` (a cumulative snapshot) or `changed` (a change notice). |
 | `requestId`, `kind`, `phase` | On `pending`: a hint that an approval or user-input request was `requested` or `settled`. |
 | `catalog` | On `catalog-changed`: which catalog changed, `skill` (re-issue `muse_skills`) or `plugin` (re-issue `muse_plugins`, plus `muse_hooks` and `muse_skills`). |
+| `goal` | On `goal-changed`: the host's goal block verbatim (`null` clears). Percent and status pass through unnormalized. |
 
 Client guidance:
 

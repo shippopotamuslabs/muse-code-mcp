@@ -232,6 +232,18 @@ function afterStart(sessionId, turnId) {
     notify("plugin/changed", { sessionId, id: "acme", version: "1.2.0", source: "marketplace", enabled: true });
     return;
   }
+  if (scenario === "goal-changed") {
+    beginTurn(sessionId, turnId);
+    completeTurn(sessionId, turnId, "MSP OK");
+    notify("session/goalChanged", {
+      sessionId,
+      viewCursor: "c99",
+      goal: { objective: "Ship the slice", percentComplete: 150, status: "weird-status", currentWork: "wiring the fold" },
+      sourceRange: { from: "r1", to: "r2" },
+    });
+    notify("session/goalChanged", { sessionId, viewCursor: "c100", goal: null, sourceRange: { from: "r3", to: "r4" } });
+    return;
+  }
   beginTurn(sessionId, turnId);
   completeTurn(sessionId, turnId, "MSP OK");
 }
