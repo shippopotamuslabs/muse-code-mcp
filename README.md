@@ -45,6 +45,10 @@ One `muse serve` host is kept per workspace + contributor mode + preset + trust.
 | `muse_decide` | `approve` or `deny` a pending approval. Deny can include `reason`. |
 | `muse_status` | One session or all: state, turn, model, workspace, token usage, pending counts. |
 | `muse_models` | List the host model catalog. Optional `workspace` or `session_id`. |
+| `muse_skills` | List a session's user-invocable skills: the slash-command catalog. |
+| `muse_mcp_servers` | List the MCP servers a session can see. |
+| `muse_plugins` | List a session's installed plugins. |
+| `muse_hooks` | List a session's installed hooks. |
 | `muse_result` | Latest completed turn, final answer text, and a short in-memory event tail. |
 | `muse_cancel` | Cancel the current turn. |
 | `muse_close` | End a session. |
@@ -54,6 +58,8 @@ One `muse serve` host is kept per workspace + contributor mode + preset + trust.
 `muse_answer` and `muse_decide` take an optional `actor` of `user` or `orchestrator` (default `orchestrator`). Policy decisions are logged as `policy`. Unanswered approvals expire to deny and unanswered questions are cancelled after `pending_timeout_sec` (default 1800). If the MCP client advertises elicitation, pending items are also offered that way. The tools still work when it does not.
 
 `muse_models` takes optional `workspace` and `session_id`. Listing by workspace starts (or reuses) that workspace's host without creating a session. Passing `session_id` flags that session's model as active, so a picker can list before it has a session and then resolve the active row once it does. The result carries `models` (each with `id`, `display_label`, `is_default`, `is_active`, and the catalog's remaining fields) plus top-level `provider_id`, `profile_id`, and `source`. It is a read-only query: no session record, no audit line.
+
+The catalog tools — `muse_skills`, `muse_mcp_servers`, `muse_plugins`, and `muse_hooks` — each take a `session_id` and run one per-session MSP list query (`skill/list`, `mcpServer/list`, `plugin/list`, `hook/list`). Skill scope follows the session's workspace and plugin state, so a client re-lists on the host's `skill/changed` and `plugin/changed` notices. `muse_skills` rows carry `selector` (the shortcut token, without the slash), `display_name`, `description`, `source`, `plugin_id`, `argument_hint`, and `title`. `muse_mcp_servers` wraps an experimental method: its result shape is not in the stable SDK types, so each row normalizes `name`, `status`, and `transport` and carries the host row verbatim under `raw`. All four are read-only queries: no session record, no audit line.
 
 `muse_spawn` arguments: `workspace` (required, absolute, must exist), `prompt` or `prompt_file`, `model`, `reasoning_effort` (`none|minimal|low|medium|high|xhigh|max|ultra`), `preset`, `worktree` (`off|create|existing`) with `worktree_base` or `worktree_path`, `approval_mode` (`yolo|on-request|judge`), `contributor_mode` (default false), `wait` (default false). There is no `output_schema` argument. MSP has no field for it.
 

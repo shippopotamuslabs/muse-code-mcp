@@ -199,6 +199,24 @@ test("live models lists the catalog without running a turn", { skip: !live, time
   }
 });
 
+test("live catalog lists skills, plugins, hooks, and MCP servers for a session", { skip: !live, timeout: 60_000 }, async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-live-ws-"));
+  const { svc } = service();
+  try {
+    const spawned = await svc.spawn({ workspace, approval_mode: "yolo" });
+    const skills = await svc.skills(spawned.session_id);
+    for (const row of skills.skills) assert.ok(row.selector.length > 0);
+    const plugins = await svc.plugins(spawned.session_id);
+    for (const row of plugins.plugins) assert.ok(row.id.length > 0);
+    const hooks = await svc.hooks(spawned.session_id);
+    for (const row of hooks.hooks) assert.ok(row.key.length > 0);
+    const servers = await svc.mcpServers(spawned.session_id);
+    for (const row of servers.servers) assert.ok(row.name.length > 0);
+  } finally {
+    await svc.shutdown();
+  }
+});
+
 test("live session-message list reports closed ingress", { skip: !live, timeout: 30_000 }, async () => {
   const { svc } = service();
   try {

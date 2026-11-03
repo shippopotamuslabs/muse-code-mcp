@@ -305,6 +305,84 @@ async function handle(msg) {
     });
     return;
   }
+  if (method === "skill/list") {
+    if (scenario === "catalog-malformed") {
+      reply(msg.id, params, {});
+      return;
+    }
+    if (scenario === "catalog-empty") {
+      reply(msg.id, params, { skills: [] });
+      return;
+    }
+    reply(msg.id, params, {
+      skills: [
+        {
+          selector: "fix-bug",
+          displayName: "Fix Bug",
+          description: "Diagnose and fix a bug",
+          source: "user",
+          argumentHint: "<description>",
+        },
+        {
+          selector: "acme:deploy",
+          displayName: "Deploy",
+          description: "Deploy with the Acme plugin",
+          source: "plugin",
+          pluginId: "acme",
+          title: "Acme Deploy",
+        },
+        { displayName: "Row with no selector is skipped" },
+      ],
+    });
+    return;
+  }
+  if (method === "plugin/list") {
+    if (scenario === "catalog-empty") {
+      reply(msg.id, params, { plugins: [] });
+      return;
+    }
+    reply(msg.id, params, {
+      plugins: [
+        { id: "acme", version: "1.2.0", source: "marketplace", enabled: true },
+        { id: "local-tools", version: "0.1.0", source: "local", enabled: false },
+      ],
+    });
+    return;
+  }
+  if (method === "hook/list") {
+    if (scenario === "catalog-empty") {
+      reply(msg.id, params, { hooks: [] });
+      return;
+    }
+    reply(msg.id, params, {
+      hooks: [
+        { key: "lint-on-save", event: "postToolUse", handlerKind: "user", enabled: true },
+        { key: "block-push", event: "preToolUse", handlerKind: "project", enabled: false },
+      ],
+    });
+    return;
+  }
+  if (method === "mcpServer/list") {
+    if (scenario === "catalog-malformed") {
+      reply(msg.id, params, {});
+      return;
+    }
+    if (scenario === "catalog-empty") {
+      reply(msg.id, params, { servers: [] });
+      return;
+    }
+    if (scenario === "mcp-servers-alt-key") {
+      reply(msg.id, params, { mcpServers: [{ id: "alt-server", state: "ready" }] });
+      return;
+    }
+    reply(msg.id, params, {
+      servers: [
+        { name: "github", status: "connected", transport: "streamableHttp", url: "https://example.invalid/mcp" },
+        { name: "local-db", transport: "stdio" },
+      ],
+    });
+    return;
+  }
   if (method === "model/list") {
     const top = { providerId: "fake", profileId: null, source: "fakeCatalog" };
     if (scenario === "models-empty") {
