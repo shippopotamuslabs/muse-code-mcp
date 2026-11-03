@@ -12,10 +12,34 @@ import { credentialMethod } from "./raw.ts";
 import { SessionStore, type SessionRecord } from "./state.ts";
 import { Coalescer, translateFrame, type StreamSink } from "./stream.ts";
 
+/**
+ * One ordered content part of a turn submission. Text parts are prompt text;
+ * skill parts invoke a `skill/list` selector with optional picked-copy source
+ * and free-text arguments. The shape mirrors the SDK's `TurnInputPart` skill
+ * arm (flat object, `type` discriminator); image and video parts stay
+ * `muse_raw` only.
+ */
+export interface TextPart {
+  type: "text";
+  text: string;
+}
+
+export type SkillPartSource = "bundled" | "user" | "project" | "plugin";
+
+export interface SkillPart {
+  type: "skill";
+  selector: string;
+  source?: SkillPartSource;
+  arguments?: string;
+}
+
+export type TurnPart = TextPart | SkillPart;
+
 export interface SpawnInput {
   workspace: string;
   prompt?: string;
   prompt_file?: string;
+  parts?: TurnPart[];
   model?: string;
   reasoning_effort?: ReasoningEffortName;
   preset?: string;
@@ -31,6 +55,7 @@ export interface TurnInput {
   session_id: string;
   prompt?: string;
   prompt_file?: string;
+  parts?: TurnPart[];
   reasoning_effort?: ReasoningEffortName;
   wait?: boolean;
 }
@@ -282,9 +307,9 @@ export class MuseService {
           reasoningEffort: effort,
         });
       }
-      const prompt = readPrompt(input.prompt, input.prompt_file);
-      if (!prompt) return { session_id: record.sessionId, status: "idle" };
-      return this.submit(live, prompt, effort, input.wait === true);
+      const parts = resolveTurnInput(input.prompt, input.prompt_file, input.parts);
+      if (!parts) return { session_id: record.sessionId, status: "idle" };
+      return this.submit(live, parts, effort, input.wait === true);
     } finally {
       this.releaseOpening();
     }
@@ -292,10 +317,10 @@ export class MuseService {
 
   async turn(input: TurnInput): Promise<CallResult> {
     const live = await this.ensure(input.session_id);
-    const prompt = readPrompt(input.prompt, input.prompt_file);
-    if (!prompt) throw new Error("turn requires prompt or prompt_file");
+    const parts = resolveTurnInput(input.prompt, input.prompt_file, input.parts);
+    if (!parts) throw new Error("turn requires prompt, prompt_file, or parts");
     const effort = input.reasoning_effort ?? live.record.reasoningEffort;
-    return this.submit(live, prompt, effort, input.wait === true);
+    return this.submit(live, parts, effort, input.wait === true);
   }
 
   async steer(sessionId: string, prompt: string, turnId: string): Promise<Record<string, unknown>> {
@@ -459,9 +484,9 @@ export class MuseService {
     await Promise.all(hosts.map((host) => host.close().catch(() => undefined)));
   }
 
-  private async submit(live: Live, prompt: string, effort: ReasoningEffortName | undefined, wait: boolean): Promise<CallResult> {
+  private async submit(live: Live, parts: TurnPart[], effort: ReasoningEffortName | undefined, wait: boolean): Promise<CallResult> {
     const turn = await live.sdk.sendUserTurn({
-      input: [{ type: "text", text: prompt }],
+      input: parts,
       ...(effort ? { reasoningEffort: effort } : {}),
     });
     live.record.turnId = turn.turnId;
@@ -958,6 +983,50 @@ function readPrompt(prompt?: string, promptFile?: string): string | undefined {
     return readFileSync(promptFile, "utf8");
   }
   return prompt;
+}
+
+const SKILL_SOURCES: ReadonlySet<string> = new Set(["bundled", "user", "project", "plugin"]);
+
+/**
+ * Merge the three prompt spellings into ordered turn parts. A non-empty
+ * `parts` wins and prompt/prompt_file are ignored; otherwise prompt and
+ * prompt_file keep their old meaning (a single text part). Empty `parts`
+ * reads as absent.
+ */
+function resolveTurnInput(prompt?: string, promptFile?: string, parts?: TurnPart[]): TurnPart[] | undefined {
+  if (parts !== undefined && parts.length > 0) return parts.map(validatePart);
+  const text = readPrompt(prompt, promptFile);
+  if (!text) return undefined;
+  return [{ type: "text", text }];
+}
+
+function validatePart(part: TurnPart, index: number): TurnPart {
+  switch (part.type) {
+    case "text":
+      if (typeof part.text !== "string") throw new Error(`parts[${index}] text part requires text`);
+      return { type: "text", text: part.text };
+    case "skill": {
+      if (typeof part.selector !== "string" || part.selector.length === 0) {
+        throw new Error(`parts[${index}] skill part requires selector`);
+      }
+      if (part.source !== undefined && !SKILL_SOURCES.has(part.source)) {
+        throw new Error(`parts[${index}] skill part source must be bundled, user, project, or plugin`);
+      }
+      if (part.arguments !== undefined && typeof part.arguments !== "string") {
+        throw new Error(`parts[${index}] skill part arguments must be a string`);
+      }
+      return {
+        type: "skill",
+        selector: part.selector,
+        ...(part.source === undefined ? {} : { source: part.source }),
+        ...(part.arguments === undefined ? {} : { arguments: part.arguments }),
+      };
+    }
+    default:
+      throw new Error(
+        `parts[${index}] has unknown type ${JSON.stringify((part as { type?: unknown }).type)}; expected "text" or "skill"`,
+      );
+  }
 }
 
 function worktreeParam(input: SpawnInput): Record<string, unknown> | undefined {

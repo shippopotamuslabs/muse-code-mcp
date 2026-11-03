@@ -227,6 +227,50 @@ test("an MCP client calls muse_skills and muse_mcp_servers for a spawned session
   }
 });
 
+test("an MCP client gets a tool error for malformed parts", async () => {
+  const home = mkdtempSync(join(tmpdir(), "muse-mcp-parts-"));
+  const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-ws-"));
+  const config = ensureHome(home, {});
+  const service = new MuseService({
+    home,
+    config,
+    bin: FAKE,
+    env: {
+      MUSE_FAKE_SCENARIO: "ok",
+      MUSE_FAKE_ARGV_LOG: join(home, "argv.log"),
+      MUSE_FAKE_METHOD_LOG: join(home, "methods.log"),
+    },
+    shutdownTimeoutMs: 0,
+  });
+  const mcp = createMcpServer(service);
+  const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "muse-mcp-test", version: "0" });
+  try {
+    await Promise.all([mcp.connect(serverTransport), client.connect(clientTransport)]);
+    const spawned = await client.callTool({ name: "muse_spawn", arguments: { workspace } });
+    assert.equal(spawned.isError, undefined);
+    const spawnContent = spawned.content as Array<{ type: string; text?: string }>;
+    const sessionId = (JSON.parse(spawnContent[0]?.text ?? "{}") as { session_id: string }).session_id;
+
+    const missing = await client.callTool({
+      name: "muse_turn",
+      arguments: { session_id: sessionId, parts: [{ type: "skill", source: "user" }] },
+    });
+    assert.equal(missing.isError, true);
+    const missingContent = missing.content as Array<{ type: string; text?: string }>;
+    assert.match(missingContent[0]?.text ?? "", /selector/);
+
+    const badSource = await client.callTool({
+      name: "muse_turn",
+      arguments: { session_id: sessionId, parts: [{ type: "skill", selector: "fix-bug", source: "nope" }] },
+    });
+    assert.equal(badSource.isError, true);
+  } finally {
+    await client.close();
+    await service.shutdown();
+  }
+});
+
 test("an elicitation answer decides a pending approval", async () => {
   const home = mkdtempSync(join(tmpdir(), "muse-mcp-elicit-"));
   const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-ws-"));

@@ -62,6 +62,21 @@ test("approval and user-input frames become pending hints", () => {
   );
 });
 
+test("skill and plugin changed frames become catalog-changed events", () => {
+  assert.deepEqual(translateFrame({ method: "skill/changed", params: { sessionId: "s1" } }), {
+    type: "catalog-changed",
+    sessionId: "s1",
+    catalog: "skill",
+  });
+  assert.deepEqual(
+    translateFrame({
+      method: "plugin/changed",
+      params: { sessionId: "s1", id: "acme", version: "1.2.0", source: "marketplace", enabled: true },
+    }),
+    { type: "catalog-changed", sessionId: "s1", catalog: "plugin" },
+  );
+});
+
 test("unmapped frames and frames without a session translate to nothing", () => {
   assert.equal(translateFrame({ method: "session/updated", params: { sessionId: "s1" } }), undefined);
   assert.equal(translateFrame({ method: "item/delta", params: { itemId: "i1", delta: "x" } }), undefined);
