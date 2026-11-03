@@ -23,7 +23,7 @@ Keep it that way.
 ## The shape
 
 - `src/server.ts` and `src/tools.ts` are the MCP edge: transport
-  wiring and the thirteen `muse_*` tool registrations. Tool handlers
+  wiring and the seventeen `muse_*` tool registrations. Tool handlers
   stay thin and delegate to the service.
 - `src/sessions.ts` (`MuseService`) owns orchestration: hosts,
   sessions, turns, steering, pending requests, resume after restart.

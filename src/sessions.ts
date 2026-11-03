@@ -98,6 +98,58 @@ export interface ModelsResult {
   source: string;
 }
 
+export interface SkillView {
+  selector: string;
+  display_name: string;
+  description: string;
+  source: string;
+  plugin_id: string | null;
+  argument_hint: string | null;
+  title: string | null;
+}
+
+export interface SkillsResult {
+  session_id: string;
+  skills: SkillView[];
+}
+
+export interface PluginView {
+  id: string;
+  version: string;
+  source: string;
+  enabled: boolean;
+}
+
+export interface PluginsResult {
+  session_id: string;
+  plugins: PluginView[];
+}
+
+export interface HookView {
+  key: string;
+  event: string;
+  handler_kind: string;
+  enabled: boolean;
+}
+
+export interface HooksResult {
+  session_id: string;
+  hooks: HookView[];
+}
+
+export interface McpServerView {
+  name: string;
+  status: string | null;
+  transport: string | null;
+  /** The host row verbatim. The experimental result shape is not in the stable SDK types, so fields beyond the three normalized above ride here instead of being dropped. */
+  raw: Record<string, unknown>;
+}
+
+export interface McpServersResult {
+  session_id: string;
+  servers: McpServerView[];
+}
+
 interface Live {
   record: SessionRecord;
   host: MuseHost;
@@ -339,6 +391,34 @@ export class MuseService {
     const params = input.session_id !== undefined ? { sessionId: input.session_id } : {};
     const raw = await host.connection.request("model/list", params);
     return decodeModels(raw);
+  }
+
+  /** List the session's user-invocable skills: the slash-command catalog. Read-only: writes no audit line and no session record. */
+  async skills(sessionId: string): Promise<SkillsResult> {
+    const live = await this.ensure(sessionId);
+    const raw = await live.host.connection.request("skill/list", { sessionId });
+    return { session_id: sessionId, skills: decodeSkills(raw) };
+  }
+
+  /** List the session's installed plugins. Read-only: writes no audit line and no session record. */
+  async plugins(sessionId: string): Promise<PluginsResult> {
+    const live = await this.ensure(sessionId);
+    const raw = await live.host.connection.request("plugin/list", { sessionId });
+    return { session_id: sessionId, plugins: decodePlugins(raw) };
+  }
+
+  /** List the session's installed hooks. Read-only: writes no audit line and no session record. */
+  async hooks(sessionId: string): Promise<HooksResult> {
+    const live = await this.ensure(sessionId);
+    const raw = await live.host.connection.request("hook/list", { sessionId });
+    return { session_id: sessionId, hooks: decodeHooks(raw) };
+  }
+
+  /** List the MCP servers the session can see (experimental `mcpServer/list`; the host is initialized with experimentalApi on). Read-only: writes no audit line and no session record. */
+  async mcpServers(sessionId: string): Promise<McpServersResult> {
+    const live = await this.ensure(sessionId);
+    const raw = await live.host.connection.request("mcpServer/list", { sessionId });
+    return { session_id: sessionId, servers: decodeMcpServers(raw) };
   }
 
   private async modelsHost(input: ModelsInput): Promise<MuseHost> {
@@ -930,6 +1010,73 @@ function decodeModelView(row: unknown): ModelView | undefined {
   if ("variants" in row) view.reasoning_efforts = row.variants;
   if ("reasoningEffortVariants" in row) view.reasoning_effort_variants = row.reasoningEffortVariants;
   return view;
+}
+
+function decodeSkills(raw: Record<string, unknown>): SkillView[] {
+  if (!Array.isArray(raw.skills)) throw new Error("MSP result has no skills array for skill/list");
+  const skills: SkillView[] = [];
+  for (const row of raw.skills) {
+    if (!isRecord(row) || typeof row.selector !== "string") continue;
+    skills.push({
+      selector: row.selector,
+      display_name: typeof row.displayName === "string" ? row.displayName : row.selector,
+      description: typeof row.description === "string" ? row.description : "",
+      source: typeof row.source === "string" ? row.source : "",
+      plugin_id: typeof row.pluginId === "string" ? row.pluginId : null,
+      argument_hint: typeof row.argumentHint === "string" ? row.argumentHint : null,
+      title: typeof row.title === "string" ? row.title : null,
+    });
+  }
+  return skills;
+}
+
+function decodePlugins(raw: Record<string, unknown>): PluginView[] {
+  if (!Array.isArray(raw.plugins)) throw new Error("MSP result has no plugins array for plugin/list");
+  const plugins: PluginView[] = [];
+  for (const row of raw.plugins) {
+    if (!isRecord(row) || typeof row.id !== "string") continue;
+    plugins.push({
+      id: row.id,
+      version: typeof row.version === "string" ? row.version : "",
+      source: typeof row.source === "string" ? row.source : "",
+      enabled: typeof row.enabled === "boolean" ? row.enabled : false,
+    });
+  }
+  return plugins;
+}
+
+function decodeHooks(raw: Record<string, unknown>): HookView[] {
+  if (!Array.isArray(raw.hooks)) throw new Error("MSP result has no hooks array for hook/list");
+  const hooks: HookView[] = [];
+  for (const row of raw.hooks) {
+    if (!isRecord(row) || typeof row.key !== "string") continue;
+    hooks.push({
+      key: row.key,
+      event: typeof row.event === "string" ? row.event : "",
+      handler_kind: typeof row.handlerKind === "string" ? row.handlerKind : "",
+      enabled: typeof row.enabled === "boolean" ? row.enabled : false,
+    });
+  }
+  return hooks;
+}
+
+function decodeMcpServers(raw: Record<string, unknown>): McpServerView[] {
+  const rows = Array.isArray(raw.servers) ? raw.servers : Array.isArray(raw.mcpServers) ? raw.mcpServers : undefined;
+  if (!rows) throw new Error("MSP result has no servers array for mcpServer/list");
+  const servers: McpServerView[] = [];
+  for (const row of rows) {
+    if (!isRecord(row)) continue;
+    const name =
+      typeof row.name === "string" ? row.name : typeof row.id === "string" ? row.id : typeof row.serverId === "string" ? row.serverId : undefined;
+    if (!name) continue;
+    servers.push({
+      name,
+      status: typeof row.status === "string" ? row.status : typeof row.state === "string" ? row.state : null,
+      transport: typeof row.transport === "string" ? row.transport : null,
+      raw: row,
+    });
+  }
+  return servers;
 }
 
 function sessionIdOf(raw: Record<string, unknown>): string {
