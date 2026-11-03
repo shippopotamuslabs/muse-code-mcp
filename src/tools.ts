@@ -162,7 +162,7 @@ export function registerTools(mcp: McpServer, service: MuseService): void {
   mcp.registerTool(
     "muse_status",
     {
-      description: "Session state, model, workspace, token usage, and pending counts. Omit session_id for every session.",
+      description: "Session state, model, workspace, token usage, latest todo list, and pending counts. Omit session_id for every session.",
       inputSchema: { session_id: z.string().optional() },
     },
     async (args) => {

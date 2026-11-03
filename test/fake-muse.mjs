@@ -244,6 +244,32 @@ function afterStart(sessionId, turnId) {
     notify("session/goalChanged", { sessionId, viewCursor: "c100", goal: null, sourceRange: { from: "r3", to: "r4" } });
     return;
   }
+  if (scenario === "todos") {
+    beginTurn(sessionId, turnId);
+    notify("session/todoListChanged", {
+      sessionId,
+      ...range(),
+      items: [
+        { text: "wire the fold", status: "inProgress", activeForm: "wiring the fold" },
+        { text: "write the docs", status: "pending" },
+      ],
+      revision: 1,
+      sourceTool: "write_todos",
+    });
+    notify("session/todoListChanged", {
+      sessionId,
+      ...range(),
+      items: [
+        { text: "wire the fold", status: "completed" },
+        { text: "write the docs", status: "inProgress", activeForm: "writing the docs" },
+      ],
+      revision: 2,
+      sourceTool: "write_todos",
+    });
+    completeTurn(sessionId, turnId, "MSP OK");
+    notify("session/todoListChanged", { sessionId, ...range(), items: [], revision: 3, sourceTool: "write_todos" });
+    return;
+  }
   beginTurn(sessionId, turnId);
   completeTurn(sessionId, turnId, "MSP OK");
 }
