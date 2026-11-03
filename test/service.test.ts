@@ -805,6 +805,63 @@ test("todoListChanged notices reach the stream sink in order, and muse_status re
   }
 });
 
+test("a spawn prompt seeds a fallback name, and a host nameChanged replaces it", async () => {
+  const box = harness("named");
+  const events: StreamEvent[] = [];
+  box.service.setStreamSink((event) => {
+    events.push(event);
+  });
+  try {
+    const spawned = await box.service.spawn({
+      workspace: box.workspace,
+      prompt: "Fix the login bug\nand add tests for it",
+      wait: true,
+    });
+    assert.equal(spawned.status, "completed");
+    await until(() => events.filter((event) => event.type === "name-changed").length === 1);
+    const named = events.filter((event) => event.type === "name-changed");
+    assert.equal(named[0]?.sessionId, spawned.session_id);
+    assert.equal(named[0]?.name, "Fix the widget pipeline");
+    assert.equal(named[0]?.origin, "automatic");
+
+    // The host's name won over the fallback, in status and in the
+    // persisted record alike.
+    const status = box.service.status(spawned.session_id)[0];
+    assert.equal(status?.name, "Fix the widget pipeline");
+    assert.equal(status?.name_origin, "automatic");
+    const stored = JSON.parse(readFileSync(join(box.home, "state.json"), "utf8")) as {
+      sessions: Record<string, { name?: string; nameOrigin?: string }>;
+    };
+    assert.equal(stored.sessions[spawned.session_id]?.name, "Fix the widget pipeline");
+    assert.equal(stored.sessions[spawned.session_id]?.nameOrigin, "automatic");
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("a spawn prompt seeds a fallback name when the host never names the session", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({
+      workspace: box.workspace,
+      prompt: "  Fix   the   login bug  \nand add tests for it",
+      wait: true,
+    });
+    assert.equal(spawned.status, "completed");
+    const status = box.service.status(spawned.session_id)[0];
+    assert.equal(status?.name, "Fix the login bug");
+    assert.equal(status?.name_origin, "fallback");
+
+    // A spawn with no prompt carries no name at all.
+    const bare = await box.service.spawn({ workspace: box.workspace });
+    const bareStatus = box.service.status(bare.session_id)[0];
+    assert.equal(bareStatus?.name, undefined);
+    assert.equal(bareStatus?.name_origin, undefined);
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
 test("context usage reaches the stream sink and muse_status; subscription observations arrive once per content", async () => {
   const box = harness("usage-detail");
   const events: StreamEvent[] = [];

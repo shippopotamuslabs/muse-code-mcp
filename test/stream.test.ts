@@ -83,6 +83,30 @@ test("contextUsage frames become context-usage events; windowTokens stays absent
   );
 });
 
+test("nameChanged frames become name-changed events; a frame without a name translates to nothing", () => {
+  assert.deepEqual(
+    translateFrame({
+      method: "session/nameChanged",
+      params: { sessionId: "s1", viewCursor: "c9", name: "Fix the widget pipeline", nameOrigin: "automatic" },
+    }),
+    { type: "name-changed", sessionId: "s1", viewCursor: "c9", name: "Fix the widget pipeline", origin: "automatic" },
+  );
+  const originless = translateFrame({
+    method: "session/nameChanged",
+    params: { sessionId: "s1", viewCursor: "c10", name: "Renamed by hand" },
+  });
+  assert.equal(originless?.type, "name-changed");
+  assert.equal(originless?.origin, undefined);
+  assert.equal(
+    translateFrame({ method: "session/nameChanged", params: { sessionId: "s1", name: "" } }),
+    undefined,
+  );
+  assert.equal(
+    translateFrame({ method: "session/nameChanged", params: { sessionId: "s1" } }),
+    undefined,
+  );
+});
+
 test("approval and user-input frames become pending hints", () => {
   assert.deepEqual(
     translateFrame({ method: "approval/requested", params: { sessionId: "s1", approvalId: "a1" } }),
