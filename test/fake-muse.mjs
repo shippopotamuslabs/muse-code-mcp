@@ -277,6 +277,17 @@ function afterStart(sessionId, turnId) {
     });
     return;
   }
+  if (scenario === "named") {
+    beginTurn(sessionId, turnId);
+    notify("session/nameChanged", {
+      sessionId,
+      ...range(),
+      name: "Fix the widget pipeline",
+      nameOrigin: "automatic",
+    });
+    completeTurn(sessionId, turnId, "MSP OK");
+    return;
+  }
   if (scenario === "todos") {
     beginTurn(sessionId, turnId);
     notify("session/todoListChanged", {

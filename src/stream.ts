@@ -27,7 +27,8 @@ export type StreamEventType =
   | "goal-changed"
   | "todos"
   | "subscription-usage"
-  | "context-usage";
+  | "context-usage"
+  | "name-changed";
 
 export interface StreamEvent {
   type: StreamEventType;
@@ -72,6 +73,10 @@ export interface StreamEvent {
   revision?: number;
   /** The tool that produced the snapshot on todos, verbatim. */
   sourceTool?: string;
+  /** The session's new canonical name on name-changed, verbatim from `session/nameChanged`. */
+  name?: string;
+  /** How the name on name-changed was set, verbatim from the frame's nameOrigin (open vocabulary); absent when the frame carries none. */
+  origin?: string;
 }
 
 export type StreamSink = (event: StreamEvent) => void | Promise<void>;
@@ -146,6 +151,17 @@ export function translateFrame(frame: HostFrame): StreamEvent | undefined {
       return { ...base, type: "catalog-changed", catalog: "plugin" };
     case "session/goalChanged":
       return { ...base, type: "goal-changed", goal: params.goal ?? null };
+    case "session/nameChanged": {
+      // The name is the fact; a frame without a non-empty one carries
+      // nothing to forward. Origin passes through verbatim when the
+      // frame proves one, and stays absent when it cannot.
+      const name = str(params, "name");
+      if (!name) return undefined;
+      const event: StreamEvent = { ...base, type: "name-changed", name };
+      const origin = str(params, "nameOrigin");
+      if (origin) event.origin = origin;
+      return event;
+    }
     case "session/contextUsage": {
       // usedTokens is the fact; a frame without it carries nothing to
       // forward. windowTokens stays absent when the host's basis has
