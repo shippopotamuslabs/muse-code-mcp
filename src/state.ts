@@ -8,6 +8,14 @@ export type SessionStatus = (typeof SESSION_STATUSES)[number];
 export interface SessionRecord {
   sessionId: string;
   workspace: string;
+  /** The session's display name (MFST-33): the host's allocated name once a
+   * session/nameChanged frame lands, else the provisional spawn-prompt
+   * fallback seeded at spawn. Absent when the session has no name yet. */
+  name?: string;
+  /** How `name` was set: the host's nameOrigin verbatim ("automatic",
+   * "custom", or a later value), or "fallback" while the provisional
+   * spawn-prompt label stands. Absent when the origin is unknown. */
+  nameOrigin?: string;
   model?: string;
   reasoningEffort?: ReasoningEffortName;
   approvalMode: ApprovalModeName;

@@ -82,6 +82,10 @@ export interface StatusResult {
   todo_list?: unknown;
   /** Latest context usage from the fold (the last `session/contextUsage` params); absent when no context fact has landed. */
   context_usage?: unknown;
+  /** The session's display name (MFST-33): the record's name, else the fold's latest `session/nameChanged` name; absent when the session has no name. */
+  name?: string;
+  /** How `name` was set: the host's nameOrigin verbatim, or "fallback" for the provisional spawn-prompt label; absent when the origin is unknown. */
+  name_origin?: string;
   pending_approvals: number;
   pending_user_inputs: number;
   fingerprint_warning?: string;
@@ -288,9 +292,12 @@ export class MuseService {
       if (worktree) params.worktree = worktree;
       const raw = await host.connection.command("session/start", params);
       const now = new Date().toISOString();
+      const snapshot = isRecord(raw.session) ? raw.session : {};
       const record: SessionRecord = {
         sessionId: sessionIdOf(raw),
         workspace,
+        name: typeof snapshot.name === "string" && snapshot.name.length > 0 ? snapshot.name : undefined,
+        nameOrigin: typeof snapshot.nameOrigin === "string" ? snapshot.nameOrigin : undefined,
         model,
         reasoningEffort: effort,
         approvalMode,
@@ -315,6 +322,19 @@ export class MuseService {
       }
       const parts = resolveTurnInput(input.prompt, input.prompt_file, input.parts);
       if (!parts) return { session_id: record.sessionId, status: "idle" };
+      if (!record.name) {
+        // Provisional label from the spawn's first text part (MFST-33):
+        // a real session/nameChanged replaces it, and its "fallback"
+        // origin keeps it distinguishable from a host-allocated name.
+        // Skill-only spawns carry no text and get no fallback.
+        const firstText = parts.find((part) => part.type === "text");
+        const fallback = firstText?.type === "text" ? fallbackName(firstText.text) : undefined;
+        if (fallback) {
+          record.name = fallback;
+          record.nameOrigin = "fallback";
+          this.store.upsert(record);
+        }
+      }
       return this.submit(live, parts, effort, input.wait === true);
     } finally {
       this.releaseOpening();
@@ -527,6 +547,14 @@ export class MuseService {
       if (resumed !== sessionId) throw new Error(`session/resume returned ${resumed} for ${sessionId}`);
       const live = this.bind(record, host);
       this.flush(sessionId);
+      // The resume snapshot carries the allocated name when the host
+      // holds one; it fills a record that predates name tracking and
+      // never replaces a name the record already carries.
+      const resumedSnapshot = isRecord(raw.session) ? raw.session : {};
+      if (!record.name && typeof resumedSnapshot.name === "string" && resumedSnapshot.name.length > 0) {
+        record.name = resumedSnapshot.name;
+        record.nameOrigin = typeof resumedSnapshot.nameOrigin === "string" ? resumedSnapshot.nameOrigin : undefined;
+      }
       record.status = live.sdk.fold.activeTurnId ? "running" : "idle";
       record.fingerprintWarning = host.fingerprintWarning ?? record.fingerprintWarning;
       record.updatedAt = new Date().toISOString();
@@ -697,6 +725,14 @@ export class MuseService {
         params,
       );
       this.maybeElicit(item);
+    }
+    if (frame.method === "session/nameChanged" && typeof params.name === "string" && params.name.length > 0) {
+      // The host's name replaces any provisional fallback. Origin is
+      // replace-wholesale too: a frame that cannot prove one clears it.
+      live.record.name = params.name;
+      live.record.nameOrigin = typeof params.nameOrigin === "string" ? params.nameOrigin : undefined;
+      live.record.updatedAt = new Date().toISOString();
+      this.store.upsert(live.record);
     }
     if (frame.method === "turn/started" && typeof params.turnId === "string") {
       live.record.turnId = params.turnId;
@@ -939,6 +975,19 @@ export class MuseService {
     const usage = live ? live.sdk.fold.sessionState.get("session/tokenUsage") : undefined;
     const todos = live ? live.sdk.fold.sessionState.get("session/todoListChanged") : undefined;
     const context = live ? live.sdk.fold.sessionState.get("session/contextUsage") : undefined;
+    // Name (MFST-33): the record first — deliver() keeps it current,
+    // including the spawn-prompt fallback. The fold fallback reads the
+    // name field off the stored session/nameChanged params: the fold
+    // stores each family's whole params object, never a bare string.
+    let name = record.name;
+    let nameOrigin = record.nameOrigin;
+    if (!name && live) {
+      const folded = live.sdk.fold.sessionState.get("session/nameChanged");
+      if (isRecord(folded) && typeof folded.name === "string" && folded.name.length > 0) {
+        name = folded.name;
+        if (typeof folded.nameOrigin === "string") nameOrigin = folded.nameOrigin;
+      }
+    }
     return {
       session_id: record.sessionId,
       status: record.status,
@@ -953,6 +1002,8 @@ export class MuseService {
       token_usage: usage,
       todo_list: todos,
       context_usage: context,
+      name,
+      name_origin: name ? nameOrigin : undefined,
       pending_approvals: pending.filter((item) => item.kind === "approval").length,
       pending_user_inputs: pending.filter((item) => item.kind === "userInput").length,
       fingerprint_warning: live?.host.fingerprintWarning ?? record.fingerprintWarning,
@@ -1197,6 +1248,21 @@ function decodeMcpServers(raw: Record<string, unknown>): McpServerView[] {
     });
   }
   return servers;
+}
+
+/**
+ * The provisional session label from a spawn prompt (MFST-33): the
+ * first non-empty line, whitespace-collapsed, capped at 60 characters
+ * with an ellipsis. Undefined when the prompt carries no text line.
+ */
+function fallbackName(prompt: string): string | undefined {
+  const firstLine = prompt
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!firstLine) return undefined;
+  const collapsed = firstLine.replace(/\s+/g, " ");
+  return collapsed.length > 60 ? `${collapsed.slice(0, 59).trimEnd()}…` : collapsed;
 }
 
 function sessionIdOf(raw: Record<string, unknown>): string {

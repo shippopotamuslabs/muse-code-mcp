@@ -96,7 +96,7 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 
 | Field | Meaning |
 | --- | --- |
-| `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, `pending`, `catalog-changed`, `goal-changed`, `todos`, `subscription-usage`, or `context-usage`. |
+| `type` | `turn-started`, `item-started`, `item-delta`, `item-completed`, `turn-completed`, `usage`, `pending`, `catalog-changed`, `goal-changed`, `todos`, `subscription-usage`, `context-usage`, or `name-changed`. |
 | `sessionId` | The session the event belongs to. Events cover every session on the connection. Absent on `subscription-usage`, which is account-scoped. |
 | `turnId` | Present when the host frame carries one. |
 | `viewCursor` | The host view cursor, verbatim, on item, usage, and turn-completed events (`turn-started` carries none). Strictly increasing per session; a jump means a gap. |
@@ -111,6 +111,7 @@ The server sends one notification method, `notifications/muse/event`, with a pla
 | `items`, `revision`, `sourceTool` | On `todos`: the session's full todo list, the snapshot revision (diagnostics only; `viewCursor` orders), and the tool that produced the snapshot. |
 | `usage` (on `subscription-usage`) | The host's subscription usage observation verbatim: tier, the current window's and the weekly block's used percents and reset stamps, as of its `observedAtMs`. Point-in-time, never live data. |
 | `usedTokens`, `windowTokens`, `pressure` | On `context-usage`: counted-once context tokens in use, the effective window size (absent when the host's basis has no limit), and the host's pressure level, verbatim. |
+| `name`, `origin` | On `name-changed`: the session's new canonical name, and how it was set (the host's origin vocabulary, verbatim; absent when the host proves none). |
 
 Client guidance:
 
@@ -119,6 +120,7 @@ Client guidance:
 - A `todos` event replaces the session's whole todo list; an empty `items` array is a cleared list, not a no-op. Items carry no stable id and no turn id, so attribute a snapshot to a turn by its arrival order within that turn. `muse_status` reports the same latest list as `todo_list` (absent when no todo fact has landed), which makes it the reconciler after a reconnect.
 - A `subscription-usage` event belongs to the account, not to a session, so it carries no `sessionId`. Hosts are per workspace posture but the account is one: the server dedupes observations by content (tier, both windows' percents and reset stamps), so the same observation arriving from two hosts reaches the client once. The matching fetch is the host's `usage/read`, available through `muse_raw`.
 - `muse_status` reports the session's latest context usage as `context_usage` (absent when no context fact has landed), the reconciler for `context-usage` events after a reconnect. A `context-usage` event without `windowTokens` means the host's context basis has no limit; render no percent rather than inventing one.
+- `muse_status` reports the session's name as `name` with its `name_origin`, the reconciler for `name-changed` events after a reconnect. A session spawned with a prompt carries a provisional label derived from that prompt until the host allocates a name; its origin reads `fallback`, and a host-allocated name (origin `automatic`, `custom`, or a later host value) replaces it. A session with no name yet omits both fields.
 - A client that cannot keep up loses delta events, never the turn. Sends never block the host, failures are counted in `droppedDeltas`, and the first failure per turn is written to the audit log. The `turn-completed` event waits, up to 250 ms, for the turn's in-flight delta sends to settle before its count is stamped; sends that outlive the wait, and the count on a `turn-completed` whose own send fails, still land in the cumulative `stream_dropped_deltas` in `muse_status`, which persists across restarts.
 
 ## Register with Grok Build
