@@ -107,6 +107,37 @@ test("nameChanged frames become name-changed events; a frame without a name tran
   );
 });
 
+test("nameChanged frames carry generatedName through when the frame publishes one", () => {
+  assert.deepEqual(
+    translateFrame({
+      method: "session/nameChanged",
+      params: {
+        sessionId: "s1",
+        viewCursor: "c11",
+        name: "Fix the widget pipeline",
+        nameOrigin: "custom",
+        generatedName: "Tiny title",
+      },
+    }),
+    {
+      type: "name-changed",
+      sessionId: "s1",
+      viewCursor: "c11",
+      name: "Fix the widget pipeline",
+      origin: "custom",
+      generatedName: "Tiny title",
+    },
+  );
+  // A frame without a generatedName carries none: absence reads as
+  // unpublished, never fabricated.
+  const bare = translateFrame({
+    method: "session/nameChanged",
+    params: { sessionId: "s1", viewCursor: "c12", name: "Renamed Later", nameOrigin: "custom" },
+  });
+  assert.equal(bare?.type, "name-changed");
+  assert.equal(bare?.generatedName, undefined);
+});
+
 test("approval and user-input frames become pending hints", () => {
   assert.deepEqual(
     translateFrame({ method: "approval/requested", params: { sessionId: "s1", approvalId: "a1" } }),

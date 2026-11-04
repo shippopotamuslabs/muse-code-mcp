@@ -47,6 +47,38 @@ test("live spark scout returns its answer", { skip: !live, timeout: 180_000 }, a
   }
 });
 
+test("live spawn settles a server-minted canonical name", { skip: !live, timeout: 180_000 }, async () => {
+  const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-live-ws-"));
+  const { svc } = service();
+  const events: StreamEvent[] = [];
+  svc.setStreamSink((event) => {
+    events.push(event);
+  });
+  try {
+    const spawned = await svc.spawn({
+      workspace,
+      prompt: "Reply with exactly: LIVE OK",
+      model: "muse-spark-1.3",
+      reasoning_effort: "minimal",
+      approval_mode: "yolo",
+      wait: true,
+    });
+    assert.equal(spawned.status, "completed");
+    // The rename fold may land just after the turn completes.
+    await until(() => (svc.status(spawned.session_id)[0]?.name_origin ?? "fallback") !== "fallback");
+    const row = svc.status(spawned.session_id)[0];
+    assert.ok(row?.name);
+    assert.match(row.name, /^[a-z]+-[a-z]+$/);
+    assert.notEqual(row.name, "Reply with exactly: LIVE OK");
+    assert.equal(row.name_origin, "custom");
+    const renamed = events.find((event) => event.type === "name-changed" && event.name === row.name);
+    assert.ok(renamed, "expected a name-changed event matching the status name");
+    assert.equal(renamed.origin, "custom");
+  } finally {
+    await svc.shutdown();
+  }
+});
+
 test("live worktree create on an untrusted repo surfaces workspaceNotTrusted", { skip: !live, timeout: 60_000 }, async () => {
   const workspace = mkdtempSync(join(tmpdir(), "muse-mcp-live-wt-"));
   execFileSync("git", ["init"], { cwd: workspace });

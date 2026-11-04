@@ -107,10 +107,13 @@ test("a streaming-capable client receives the turn as notifications", async () =
     });
     assert.equal(spawned.isError, undefined);
     await untilStream(() => events.some((event) => event.type === "turn-completed"));
+    // The spawn's session/rename lands first as a name-changed event.
     assert.deepEqual(
       events.map((event) => event.type),
-      ["turn-started", "item-started", "item-delta", "item-completed", "turn-completed"],
+      ["name-changed", "turn-started", "item-started", "item-delta", "item-completed", "turn-completed"],
     );
+    assert.match(String(events[0]?.name), /^[a-z]+-[a-z]+$/);
+    assert.equal(events[0]?.origin, "custom");
     const delta = events.find((event) => event.type === "item-delta");
     assert.equal(delta?.delta, "MSP STREAM OK");
     const result = await client.callTool({

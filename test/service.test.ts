@@ -124,21 +124,24 @@ test("a stream sink receives the turn in order and the deltas build the answer",
   try {
     const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
     assert.equal(spawned.status, "completed");
+    // The spawn's session/rename lands first as a name-changed event.
     assert.deepEqual(
       events.map((event) => event.type),
-      ["turn-started", "item-started", "item-delta", "item-completed", "turn-completed"],
+      ["name-changed", "turn-started", "item-started", "item-delta", "item-completed", "turn-completed"],
     );
+    assert.match(String(events[0]?.name), /^[a-z]+-[a-z]+$/);
+    assert.equal(events[0]?.origin, "custom");
     const delta = events.find((event) => event.type === "item-delta");
     assert.equal(delta?.delta, "MSP STREAM OK");
     assert.equal(delta?.delta, box.service.result(spawned.session_id).answer);
     const completed = events.find((event) => event.type === "turn-completed");
     assert.equal(completed?.answer, "MSP STREAM OK");
     assert.equal(completed?.droppedDeltas, 0);
-    assert.equal(events[0]?.turnId, spawned.turn_id);
+    assert.equal(events[1]?.turnId, spawned.turn_id);
     assert.equal(completed?.turnId, spawned.turn_id);
     // turn-started carries no viewCursor on the real protocol; the rest strictly increase.
     const cursors = events.flatMap((event) => (event.viewCursor ? [Number(event.viewCursor.slice(1))] : []));
-    assert.equal(cursors.length, 4);
+    assert.equal(cursors.length, 5);
     assert.equal(cursors.every((cursor, index) => index === 0 || cursor > (cursors[index - 1] ?? 0)), true);
   } finally {
     await box.service.shutdown();
@@ -155,10 +158,13 @@ test("a failing stream sink never breaks the turn and the drops are counted", as
     assert.equal(spawned.status, "completed");
     assert.equal(box.service.result(spawned.session_id).answer, "MSP STREAM OK");
     assert.equal(box.service.status(spawned.session_id)[0]?.stream_dropped_deltas, 1);
+    // Two first-failure audits: the rename's name-changed fails before
+    // the turn starts, and turn-started resets the per-turn flag, so the
+    // in-turn delta failure audits again. Only delta sends count as drops.
     const errors = readAudit(box.home).filter(
       (event) => event.kind === "error" && (event.detail as { source?: string })?.source === "stream",
     );
-    assert.equal(errors.length, 1);
+    assert.equal(errors.length, 2);
     const stored = JSON.parse(readFileSync(join(box.home, "state.json"), "utf8")) as {
       sessions: Record<string, { streamDroppedDeltas?: number }>;
     };
@@ -818,11 +824,15 @@ test("a spawn prompt seeds a fallback name, and a host nameChanged replaces it",
       wait: true,
     });
     assert.equal(spawned.status, "completed");
-    await until(() => events.filter((event) => event.type === "name-changed").length === 1);
+    // Two renames land: the server's own session/rename first (minted
+    // canonical name, origin custom), then the host's automatic name.
+    await until(() => events.filter((event) => event.type === "name-changed").length === 2);
     const named = events.filter((event) => event.type === "name-changed");
-    assert.equal(named[0]?.sessionId, spawned.session_id);
-    assert.equal(named[0]?.name, "Fix the widget pipeline");
-    assert.equal(named[0]?.origin, "automatic");
+    assert.ok(named.every((event) => event.sessionId === spawned.session_id));
+    assert.match(String(named[0]?.name), /^[a-z]+-[a-z]+$/);
+    assert.equal(named[0]?.origin, "custom");
+    assert.equal(named[1]?.name, "Fix the widget pipeline");
+    assert.equal(named[1]?.origin, "automatic");
 
     // The host's name won over the fallback, in status and in the
     // persisted record alike.
@@ -839,7 +849,7 @@ test("a spawn prompt seeds a fallback name, and a host nameChanged replaces it",
   }
 });
 
-test("a spawn prompt seeds a fallback name when the host never names the session", async () => {
+test("a spawn prompt seeds a fallback name until the rename settles a canonical one", async () => {
   const box = harness("ok");
   try {
     const spawned = await box.service.spawn({
@@ -848,15 +858,114 @@ test("a spawn prompt seeds a fallback name when the host never names the session
       wait: true,
     });
     assert.equal(spawned.status, "completed");
+    // The server's session/rename settles a canonical name over the
+    // provisional prompt label.
+    await until(() => box.service.status(spawned.session_id)[0]?.name_origin === "custom");
+    const status = box.service.status(spawned.session_id)[0];
+    assert.match(String(status?.name), /^[a-z]+-[a-z]+$/);
+    assert.notEqual(status?.name, "Fix the login bug");
+    assert.equal(status?.name_origin, "custom");
+
+    // A spawn with no prompt gets a canonical name too (rename, no fallback).
+    const bare = await box.service.spawn({ workspace: box.workspace });
+    await until(() => box.service.status(bare.session_id)[0]?.name_origin === "custom");
+    const bareStatus = box.service.status(bare.session_id)[0];
+    assert.match(String(bareStatus?.name), /^[a-z]+-[a-z]+$/);
+    assert.equal(bareStatus?.name_origin, "custom");
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("spawn allocates a canonical name via session/rename and status reports it", async () => {
+  const box = harness("ok");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "Fix the login bug", wait: true });
+    assert.equal(spawned.status, "completed");
+    const renames = box.methods().filter((entry) => entry.method === "session/rename");
+    assert.equal(renames.length, 1);
+    assert.equal(renames[0]?.params.sessionId, spawned.session_id);
+    const minted = renames[0]?.params.name;
+    assert.match(String(minted), /^[a-z]+-[a-z]+$/);
+    assert.notEqual(minted, "Fix the login bug");
+    // The settled rename (plus its nameChanged fold) replaces the fallback.
+    await until(() => box.service.status(spawned.session_id)[0]?.name_origin === "custom");
+    const status = box.service.status(spawned.session_id)[0];
+    assert.equal(status?.name, minted);
+    assert.equal(status?.name_origin, "custom");
+    const stored = JSON.parse(readFileSync(join(box.home, "state.json"), "utf8")) as {
+      sessions: Record<string, { name?: string; nameOrigin?: string }>;
+    };
+    assert.equal(stored.sessions[spawned.session_id]?.name, minted);
+    assert.equal(stored.sessions[spawned.session_id]?.nameOrigin, "custom");
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("a failed session/rename keeps the spawn alive on the fallback name and audits the failure", async () => {
+  const box = harness("ok");
+  const reject = join(box.home, "reject-rename");
+  box.env.MUSE_FAKE_REJECT_RENAME_FILE = reject;
+  writeFileSync(reject, "1");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "Fix the login bug", wait: true });
+    assert.equal(spawned.status, "completed");
+    assert.equal(
+      box.methods().filter((entry) => entry.method === "session/rename").length,
+      1,
+    );
     const status = box.service.status(spawned.session_id)[0];
     assert.equal(status?.name, "Fix the login bug");
     assert.equal(status?.name_origin, "fallback");
+    const errors = readAudit(box.home).filter(
+      (event) => event.kind === "error" && (event.detail as { source?: string })?.source === "rename",
+    );
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0]?.sessionId, spawned.session_id);
+  } finally {
+    await box.service.shutdown();
+  }
+});
 
-    // A spawn with no prompt carries no name at all.
-    const bare = await box.service.spawn({ workspace: box.workspace });
-    const bareStatus = box.service.status(bare.session_id)[0];
-    assert.equal(bareStatus?.name, undefined);
-    assert.equal(bareStatus?.name_origin, undefined);
+test("a nameChanged frame carrying generatedName persists it for muse_status", async () => {
+  const box = harness("named-generated");
+  const events: StreamEvent[] = [];
+  box.service.setStreamSink((event) => {
+    events.push(event);
+  });
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "go", wait: true });
+    assert.equal(spawned.status, "completed");
+    await until(() => box.service.status(spawned.session_id)[0]?.generated_name === "Tiny title");
+    await until(() => box.service.status(spawned.session_id)[0]?.name === "Renamed Later");
+    const named = events.filter((event) => event.type === "name-changed");
+    assert.ok(named.some((event) => event.generatedName === "Tiny title"));
+    // The later nameChanged without a generatedName kept the recorded value.
+    const status = box.service.status(spawned.session_id)[0];
+    assert.equal(status?.name, "Renamed Later");
+    assert.equal(status?.generated_name, "Tiny title");
+    const stored = JSON.parse(readFileSync(join(box.home, "state.json"), "utf8")) as {
+      sessions: Record<string, { generatedName?: string }>;
+    };
+    assert.equal(stored.sessions[spawned.session_id]?.generatedName, "Tiny title");
+  } finally {
+    await box.service.shutdown();
+  }
+});
+
+test("a snapshot-provided name skips session/rename", async () => {
+  const box = harness("named-start");
+  try {
+    const spawned = await box.service.spawn({ workspace: box.workspace, prompt: "Fix the login bug", wait: true });
+    assert.equal(spawned.status, "completed");
+    assert.equal(
+      box.methods().some((entry) => entry.method === "session/rename"),
+      false,
+    );
+    const status = box.service.status(spawned.session_id)[0];
+    assert.equal(status?.name, "Allocated Start Name");
+    assert.equal(status?.name_origin, "automatic");
   } finally {
     await box.service.shutdown();
   }

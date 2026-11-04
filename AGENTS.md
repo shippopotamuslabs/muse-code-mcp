@@ -33,10 +33,11 @@ Keep it that way.
 - `src/broker.ts`, `src/policy.ts`, and `src/answers.ts` are the
   pending-request machinery: queueing, auto-approve matching, and
   shaping answers back onto the wire. Plain data in, plain data out.
-- `src/config.ts`, `src/state.ts`, `src/audit.ts`, `src/raw.ts`, and
-  `src/message.ts` are the plain support modules: TOML config and
-  env layering, session records, the JSONL audit log, the
-  credential-method refusal list, and the `muse session-message`
+- `src/config.ts`, `src/state.ts`, `src/audit.ts`, `src/raw.ts`,
+  `src/names.ts`, and `src/message.ts` are the plain support
+  modules: TOML config and env layering, session records, the
+  JSONL audit log, the credential-method refusal list, the
+  canonical session-name mint, and the `muse session-message`
   subprocess. `message.ts` does not speak MSP and does not touch
   the session store or the broker.
 - `src/stream.ts` is the plain stream module: it translates host
@@ -136,6 +137,12 @@ the commit or PR which live checks ran.
 - A failed worktree request surfaces the host error (e.g.
   `workspaceNotTrusted`). The server never falls back to running
   `git worktree` itself.
+- The host allocates no name for MSP-started sessions, so a spawn
+  whose start snapshot lacks one settles a server-minted canonical
+  name via `session/rename`. A failed rename never fails the
+  spawn: the provisional fallback label stands and the failure is
+  an audit line. The fallback text is never sent to
+  `session/rename`.
 - `muse_message` lists and sends `muse session-message` traffic to
   sessions this server did not start. It does not set
   `MUSE_EXPERIMENTAL_EXTERNAL_AGENT_INGRESS` or

@@ -77,6 +77,10 @@ export interface StreamEvent {
   name?: string;
   /** How the name on name-changed was set, verbatim from the frame's nameOrigin (open vocabulary); absent when the frame carries none. */
   origin?: string;
+  /** The host-published generated short title on name-changed, verbatim
+   * from the frame's generatedName when it carries a non-empty one;
+   * absent when the frame publishes none (unpublished, never cleared). */
+  generatedName?: string;
 }
 
 export type StreamSink = (event: StreamEvent) => void | Promise<void>;
@@ -160,6 +164,8 @@ export function translateFrame(frame: HostFrame): StreamEvent | undefined {
       const event: StreamEvent = { ...base, type: "name-changed", name };
       const origin = str(params, "nameOrigin");
       if (origin) event.origin = origin;
+      const generatedName = str(params, "generatedName");
+      if (generatedName) event.generatedName = generatedName;
       return event;
     }
     case "session/contextUsage": {
