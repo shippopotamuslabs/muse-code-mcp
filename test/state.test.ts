@@ -29,6 +29,20 @@ test("a state file with no sessions object is corrupt, not empty", () => {
   assert.throws(() => store.list(), /corrupt/);
 });
 
+test("a generatedName survives a store round trip", () => {
+  const home = mkdtempSync(join(tmpdir(), "muse-mcp-state-"));
+  ensureHome(home, {});
+  const first = new SessionStore(home);
+  const stored = record("idle");
+  stored.name = "brook-io";
+  stored.nameOrigin = "custom";
+  stored.generatedName = "Tiny title";
+  first.upsert(stored);
+  const second = new SessionStore(home);
+  assert.equal(second.get("sess-1")?.name, "brook-io");
+  assert.equal(second.get("sess-1")?.generatedName, "Tiny title");
+});
+
 test("a running session is orphaned when the store is loaded again", () => {
   const home = mkdtempSync(join(tmpdir(), "muse-mcp-state-"));
   ensureHome(home, {});

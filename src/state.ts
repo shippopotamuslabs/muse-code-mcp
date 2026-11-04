@@ -16,6 +16,11 @@ export interface SessionRecord {
    * "custom", or a later value), or "fallback" while the provisional
    * spawn-prompt label stands. Absent when the origin is unknown. */
   nameOrigin?: string;
+  /** The host-published generated short title (MFST-61/S4):
+   * additive-optional, carried on `session/nameChanged` frames and
+   * Session snapshots. Absent when the host never published one —
+   * never fabricated, never inferred from the name text. */
+  generatedName?: string;
   model?: string;
   reasoningEffort?: ReasoningEffortName;
   approvalMode: ApprovalModeName;

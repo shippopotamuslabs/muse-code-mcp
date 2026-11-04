@@ -8,6 +8,7 @@ import { approvalWire, type ApprovalModeName, type MuseMcpConfig, type Reasoning
 import { MuseHost, postureKey, type HostFrame, type HostPosture } from "./host.ts";
 import type { ApprovalSubjectView } from "./policy.ts";
 import { messageErrorCode, runSessionMessage, SessionMessageError, type MessageInput, type MessageResult } from "./message.ts";
+import { mintSessionName } from "./names.ts";
 import { credentialMethod } from "./raw.ts";
 import { SessionStore, type SessionRecord } from "./state.ts";
 import { Coalescer, translateFrame, type StreamSink } from "./stream.ts";
@@ -86,6 +87,10 @@ export interface StatusResult {
   name?: string;
   /** How `name` was set: the host's nameOrigin verbatim, or "fallback" for the provisional spawn-prompt label; absent when the origin is unknown. */
   name_origin?: string;
+  /** The host-published generated short title (MFST-61/S4): the record's
+   * generatedName, else the fold's latest `session/nameChanged`
+   * generatedName; absent when the host never published one. */
+  generated_name?: string;
   pending_approvals: number;
   pending_user_inputs: number;
   fingerprint_warning?: string;
@@ -293,11 +298,16 @@ export class MuseService {
       const raw = await host.connection.command("session/start", params);
       const now = new Date().toISOString();
       const snapshot = isRecord(raw.session) ? raw.session : {};
+      const startName = typeof snapshot.name === "string" && snapshot.name.length > 0 ? snapshot.name : undefined;
       const record: SessionRecord = {
         sessionId: sessionIdOf(raw),
         workspace,
-        name: typeof snapshot.name === "string" && snapshot.name.length > 0 ? snapshot.name : undefined,
+        name: startName,
         nameOrigin: typeof snapshot.nameOrigin === "string" ? snapshot.nameOrigin : undefined,
+        generatedName:
+          typeof snapshot.generatedName === "string" && snapshot.generatedName.length > 0
+            ? snapshot.generatedName
+            : undefined,
         model,
         reasoningEffort: effort,
         approvalMode,
@@ -319,6 +329,16 @@ export class MuseService {
           sessionId: record.sessionId,
           reasoningEffort: effort,
         });
+      }
+      // Server-side canonical naming (MFST-61/S4): the host never
+      // allocates a name for MSP-started sessions, so every spawn whose
+      // start snapshot lacked one settles a minted name via
+      // session/rename. This runs before the first turn submission — and
+      // before the no-parts early return below — so the row is never
+      // nameless on the rename's success arm, including skill-only and
+      // promptless spawns (which get a canonical name but no fallback).
+      if (!startName) {
+        await this.allocateName(host, record);
       }
       const parts = resolveTurnInput(input.prompt, input.prompt_file, input.parts);
       if (!parts) return { session_id: record.sessionId, status: "idle" };
@@ -525,6 +545,41 @@ export class MuseService {
     return { session_id: live.record.sessionId, turn_id: turn.turnId, status };
   }
 
+  /**
+   * Settle a minted canonical name via `session/rename` (MFST-61/S4).
+   * The connection mints the command id itself, like every other
+   * `command()` call site in this file — the caller supplies only the
+   * session and the requested name. A non-empty settled `name` on the
+   * result replaces the row's name; an omitted name (the accepted arm)
+   * leaves the later `session/nameChanged` to do it, and the origin
+   * stays whatever frames prove — never fabricated here. A rename
+   * failure never fails the spawn: the fallback (or no name) stands
+   * and the failure is an audit line.
+   */
+  private async allocateName(host: MuseHost, record: SessionRecord): Promise<void> {
+    const taken = new Set(
+      this.store.list().flatMap((entry) => (entry.name !== undefined && entry.name.length > 0 ? [entry.name] : [])),
+    );
+    const candidate = mintSessionName(taken);
+    try {
+      const result = await host.connection.command("session/rename", {
+        sessionId: record.sessionId,
+        name: candidate,
+      });
+      if (typeof result.name === "string" && result.name.length > 0) {
+        record.name = result.name;
+        record.updatedAt = new Date().toISOString();
+        this.store.upsert(record);
+      }
+    } catch (error) {
+      this.audit({
+        kind: "error",
+        sessionId: record.sessionId,
+        detail: { source: "rename", error: error instanceof Error ? error.message : String(error) },
+      });
+    }
+  }
+
   private async ensure(sessionId: string): Promise<Live> {
     const record = this.requireRecord(sessionId);
     if (record.status === "closed") throw new Error(`session ${sessionId} is closed`);
@@ -554,6 +609,13 @@ export class MuseService {
       if (!record.name && typeof resumedSnapshot.name === "string" && resumedSnapshot.name.length > 0) {
         record.name = resumedSnapshot.name;
         record.nameOrigin = typeof resumedSnapshot.nameOrigin === "string" ? resumedSnapshot.nameOrigin : undefined;
+      }
+      if (
+        !record.generatedName &&
+        typeof resumedSnapshot.generatedName === "string" &&
+        resumedSnapshot.generatedName.length > 0
+      ) {
+        record.generatedName = resumedSnapshot.generatedName;
       }
       record.status = live.sdk.fold.activeTurnId ? "running" : "idle";
       record.fingerprintWarning = host.fingerprintWarning ?? record.fingerprintWarning;
@@ -731,6 +793,12 @@ export class MuseService {
       // replace-wholesale too: a frame that cannot prove one clears it.
       live.record.name = params.name;
       live.record.nameOrigin = typeof params.nameOrigin === "string" ? params.nameOrigin : undefined;
+      // generatedName is additive-optional, unlike name: present means
+      // published, absent means unpublished-or-unknown, so a frame
+      // without one preserves the previously recorded value.
+      if (typeof params.generatedName === "string" && params.generatedName.length > 0) {
+        live.record.generatedName = params.generatedName;
+      }
       live.record.updatedAt = new Date().toISOString();
       this.store.upsert(live.record);
     }
@@ -988,6 +1056,16 @@ export class MuseService {
         if (typeof folded.nameOrigin === "string") nameOrigin = folded.nameOrigin;
       }
     }
+    // generatedName (MFST-61/S4): the record first, then the fold's
+    // stored session/nameChanged params — the same record-then-fold
+    // shape as name above.
+    let generatedName = record.generatedName;
+    if (!generatedName && live) {
+      const folded = live.sdk.fold.sessionState.get("session/nameChanged");
+      if (isRecord(folded) && typeof folded.generatedName === "string" && folded.generatedName.length > 0) {
+        generatedName = folded.generatedName;
+      }
+    }
     return {
       session_id: record.sessionId,
       status: record.status,
@@ -1004,6 +1082,7 @@ export class MuseService {
       context_usage: context,
       name,
       name_origin: name ? nameOrigin : undefined,
+      generated_name: generatedName,
       pending_approvals: pending.filter((item) => item.kind === "approval").length,
       pending_user_inputs: pending.filter((item) => item.kind === "userInput").length,
       fingerprint_warning: live?.host.fingerprintWarning ?? record.fingerprintWarning,

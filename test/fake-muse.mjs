@@ -56,14 +56,22 @@ function notify(method, params) {
   send({ jsonrpc: "2.0", method, params });
 }
 
+const renamed = new Map();
+
 function sessionObject(sessionId, workspace) {
-  return {
+  const object = {
     sessionId,
     activeTurnId: null,
     status: "idle",
     workspaceRoot: workspace ?? "/tmp",
     modelId: "fake",
   };
+  const settled = renamed.get(sessionId);
+  if (settled) {
+    object.name = settled.name;
+    object.nameOrigin = settled.nameOrigin;
+  }
+  return object;
 }
 
 const CHOICES = [
@@ -288,6 +296,25 @@ function afterStart(sessionId, turnId) {
     completeTurn(sessionId, turnId, "MSP OK");
     return;
   }
+  if (scenario === "named-generated") {
+    beginTurn(sessionId, turnId);
+    notify("session/nameChanged", {
+      sessionId,
+      ...range(),
+      name: "Canonical Name",
+      nameOrigin: "custom",
+      generatedName: "Tiny title",
+    });
+    completeTurn(sessionId, turnId, "MSP OK");
+    // A later frame without a generatedName must not clear the recorded one.
+    notify("session/nameChanged", {
+      sessionId,
+      ...range(),
+      name: "Renamed Later",
+      nameOrigin: "custom",
+    });
+    return;
+  }
   if (scenario === "todos") {
     beginTurn(sessionId, turnId);
     notify("session/todoListChanged", {
@@ -343,10 +370,31 @@ async function handle(msg) {
   }
   if (method === "session/start" || method === "session/resume") {
     const sessionId = typeof params.sessionId === "string" ? params.sessionId : `sess-${++seq}`;
-    reply(msg.id, params, { session: sessionObject(sessionId, params.workspaceRoot), viewCursor: "c0" });
+    const object = sessionObject(sessionId, params.workspaceRoot);
+    if (method === "session/start" && scenario === "named-start") {
+      object.name = "Allocated Start Name";
+      object.nameOrigin = "automatic";
+    }
+    reply(msg.id, params, { session: object, viewCursor: "c0" });
     if (method === "session/start" && scenario === "crash-after-start") {
       setTimeout(() => process.exit(1), 40);
     }
+    return;
+  }
+  if (method === "session/rename") {
+    if (consumeReject("MUSE_FAKE_REJECT_RENAME_FILE")) {
+      fail(msg.id, -32053, "rename rejected", "commandRejected");
+      return;
+    }
+    const name = typeof params.name === "string" ? params.name : "";
+    renamed.set(params.sessionId, { name, nameOrigin: "custom" });
+    reply(msg.id, params, { name, status: "accepted" });
+    notify("session/nameChanged", {
+      sessionId: params.sessionId,
+      ...range(),
+      name,
+      nameOrigin: "custom",
+    });
     return;
   }
   if (method === "turn/start") {
